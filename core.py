@@ -16,6 +16,44 @@ from tensorflow.python.ops import control_flow_util
 control_flow_util.ENABLE_CONTROL_FLOW_V2 = True
 
 
+class Gaussian(object):
+
+    def __init__(self, mu, rho):
+        super().__init__()
+        self.mu = mu
+        self.rho = rho
+
+    @property
+    def sigma(self):
+        return K.log(1 + K.exp(self.rho))
+
+    def sample(self):
+        epsilon = K.random_normal(self.mu.shape)
+        return self.mu + self.sigma * epsilon
+
+    def log_likelihood(self, x):
+        return -0.5 * (K.pow(((x - K.stop_gradient(self.mu)) / K.stop_gradient(self.sigma)), 2)
+                             + K.log(2*np.pi)
+                             + 2*K.log(K.stop_gradient(self.sigma)))
+
+
+class ScaleMixtureGaussian(object):
+    def __init__(self, pi, sigma1, sigma2):
+        super().__init__()
+        self.pi = pi
+        self.sigma1 = sigma1
+        self.sigma2 = sigma2
+        self.rho1 = K.log(K.exp(self.sigma1) - 1)
+        self.rho2 = K.log(K.exp(self.sigma2) - 1)
+        self.gaussian1 = Gaussian(0., self.rho1)
+        self.gaussian2 = Gaussian(0., self.rho2)
+
+    def log_prob(self, x):
+        prob1 = K.exp(self.gaussian1.log_likelihood(x))
+        prob2 = K.exp(self.gaussian2.log_likelihood(x))
+        return K.log(self.pi * prob1 + (1 - self.pi) * prob2)
+
+
 class Bayesion(Layer):
     """ A Bayesion Neural Network implemented with Bayes by Backprop
     [Weight Uncertaint in Neural Networks, C. Blundell 2015]
@@ -108,9 +146,7 @@ class Bayesion(Layer):
         self.activation = activations.get(activation)
         self.use_bias = use_bias
 
-        self.prior_mixture_std_1 = prior_mixture_std_1
-        self.prior_mixture_std_2 = prior_mixture_std_2
-        self.prior_mixture_weight = prior_mixture_weight
+        self.prior_distribution = ScaleMixtureGaussian(prior_mixture_weight, prior_mixture_std_1, prior_mixture_std_2)
 
         self.kernel_mean_initializer = kernel_mean_initializer
         self.kernel_rho_initializer = kernel_rho_initializer
@@ -146,6 +182,7 @@ class Bayesion(Layer):
                                       regularizer=self.kernel_rho_regularizer,
                                       constraint=self.kernel_rho_constraint)
 
+        self.kernel_distribution = Gaussian(self.kernel_mean, self.kernel_rho)
 
         if self.use_bias:
             self.bias_mean = self.add_weight(shape=(self.units,),
@@ -159,6 +196,8 @@ class Bayesion(Layer):
                                         name='bias_rho',
                                         regularizer=self.bias_rho_regularizer,
                                         constraint=self.bias_rho_constraint)
+
+            self.bias_distribution = Gaussian(self.bias_mean, self.bias_rho)
 
         else:
             self.bias = None
@@ -209,27 +248,16 @@ class Bayesion(Layer):
         input_dim, units  = self.kernel_mean.shape
 
         # epsilon should be resampled for each input
-        kernel_epsilon = K.random_normal(self.kernel_mean.shape)
-        kernel_std = K.log(1+K.exp(self.kernel_rho))
-        self.kernel = self.kernel_mean + kernel_std * kernel_epsilon
-        self.kernel_posterior = K.sum(-0.5 * (K.pow(((self.kernel - K.stop_gradient(self.kernel_mean)) / K.stop_gradient(kernel_std)), 2) + K.log(2*np.pi) + 2*K.log(K.stop_gradient(kernel_std)))) # Gaussian likelihoods
-
-        kernel_mix_1 = -0.5 * (K.pow((self.kernel / self.prior_mixture_std_1), 2) + K.log(2*np.pi) + 2*K.log(self.prior_mixture_std_1))
-        kernel_mix_2 = -0.5 * (K.pow((self.kernel / self.prior_mixture_std_2), 2) + K.log(2*np.pi) + 2*K.log(self.prior_mixture_std_2))
-        self.log_prior = K.sum(K.log(self.prior_mixture_weight * K.exp(kernel_mix_1) + (1 - self.prior_mixture_weight) * K.exp(kernel_mix_2)))
+        self.kernel = self.kernel_distribution.sample()
+        self.variational_posterior = K.sum(self.kernel_distribution.log_likelihood(self.kernel))
+        self.log_prior = K.sum(self.prior_distribution.log_prob(self.kernel))
 
         output = K.dot(inputs, self.kernel)
 
         if self.use_bias:
-            bias_epsilon = K.random_normal((units,))
-            bias_std = K.log(1 + K.exp(self.bias_rho))
-            self.bias = self.bias_mean + bias_std * bias_epsilon
-            self.bias_posterior = K.sum(-0.5 * (K.pow(((self.bias - K.stop_gradient(self.bias_mean)) / K.stop_gradient(bias_std)), 2) + K.log(2*np.pi) + 2*K.log(K.stop_gradient(bias_std)))) # Gaussian likelihoods
-            self.log_posterior = self.kernel_posterior + self.bias_posterior
-
-            bias_mix_1 = -0.5 * (K.pow((self.bias / self.prior_mixture_std_1), 2) + K.log(2*np.pi) + 2*K.log(self.prior_mixture_std_1))
-            bias_mix_2 = -0.5 * (K.pow((self.bias / self.prior_mixture_std_2), 2) + K.log(2*np.pi) + 2*K.log(self.prior_mixture_std_2))
-            self.log_prior += K.sum(K.log(self.prior_mixture_weight * K.exp(bias_mix_1) + (1 - self.prior_mixture_weight) * K.exp(bias_mix_2)))
+            self.bias = self.bias_distribution.sample()
+            self.variational_posterior += K.sum(self.bias_distribution.log_likelihood(self.bias))
+            self.log_prior += K.sum(self.prior_distribution.log_prob(self.bias))
 
             output = K.bias_add(output, self.bias)
         if self.activation is not None:
@@ -238,7 +266,7 @@ class Bayesion(Layer):
         #self.complexity_cost.assign(self.log_posterior - self.log_prior)
         # print("log posterior : {}".format(self.log_posterior))
         # print("log prior : {}".format(self.log_prior))
-        self.add_loss(self.log_posterior - self.log_prior)
+        self.add_loss(self.variational_posterior - self.log_prior)
 
         return output
 
