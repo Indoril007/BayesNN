@@ -1,5 +1,6 @@
 from __future__ import print_function
 import time
+from tqdm import tqdm
 import numpy as np
 import tensorflow as tf
 import tensorflow.keras as keras
@@ -13,8 +14,8 @@ from tensorflow.keras.layers import Conv2D, MaxPooling2D
 from core import BayesNN
 import os
 
-#from tensorflow.python.ops import control_flow_util
-#control_flow_util.ENABLE_CONTROL_FLOW_V2 = True
+from tensorflow.python.ops import control_flow_util
+control_flow_util.ENABLE_CONTROL_FLOW_V2 = True
 
 batch_size = 128
 num_classes = 10
@@ -28,20 +29,21 @@ model_name = 'keras_cifar10_trained_model.h5'
 # The data, split between train and test sets:
 (x_train, y_train), (x_test, y_test) = mnist.load_data()
 x_train = x_train.astype(np.float32)
+x_test = x_test.astype(np.float32)
 
 N = len(x_train)
 M = N // batch_size
 
 # Convert class vectors to binary class matrices.
-y_train = keras.utils.to_categorical(y_train, num_classes)
-y_test = keras.utils.to_categorical(y_test, num_classes)
+y_train_logits = keras.utils.to_categorical(y_train, num_classes)
+y_test_logits = keras.utils.to_categorical(y_test, num_classes)
 
 model = BayesNN(input_dim=(28, 28), output_dim=10)
 cce = CategoricalCrossentropy()
 
 optimizer = Adam(learning_rate=0.001)
 
-#@tf.function
+@tf.function
 def train_step(images, labels, weight):
     with tf.GradientTape() as t:
         predictions, complexity_loss = model(images)
@@ -51,16 +53,25 @@ def train_step(images, labels, weight):
     optimizer.apply_gradients(zip(grads, model.trainable_variables))
     return likelihood_loss, complexity_loss
 
+summary_writer = tf.summary.create_file_writer('./summaries')
 epochs = 100
-for epoch in range(epochs):
-    print("EPOCH {}".format(epoch))
-    batches = np.random.permutation(range(N))[:N-(N % batch_size)].reshape(M,batch_size)
-    for i, batch in enumerate(batches):
-        #weight = (2**(M - i + 1))/(2**M - 1)
-        weight = 1 / M
-        l_loss, c_loss = train_step(x_train[batch], y_train[batch], weight)
-        print(l_loss)
-        print(c_loss)
+acc = tf.keras.metrics.Accuracy()
+with summary_writer.as_default():
+    for epoch in range(epochs):
+        print("EPOCH {}".format(epoch))
+        batches = np.random.permutation(range(N))[:N-(N % batch_size)].reshape(M,batch_size)
+        for i in tqdm(range(len(batches))):
+            batch = batches[i]
+            #weight = (2**(M - i + 1))/(2**M - 1)
+            weight = 1 / M
+            l_loss, c_loss = train_step(x_train[batch], y_train_logits[batch], weight)
+            tf.summary.scalar('likelihood_loss', l_loss, step=i)
+            tf.summary.scalar('complexity_loss', c_loss, step=i)
+
+        logits, complexity_loss = model(x_test)
+        prediction = tf.argmax(logits, axis=1, output_type=tf.int32)
+        val_acc = acc(prediction, y_test)
+        print("Validation accuracy: {}".format(val_acc))
 
 # model = Sequential()
 #

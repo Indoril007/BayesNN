@@ -307,19 +307,24 @@ class BayesNN(tf.keras.Model):
         self.final_layer = Bayesion(output_dim)
         self.final_layer_activation = Activation('softmax')
         self.batch_size = batch_size
+        self.output_dim = output_dim
 
 
-    @tf.function
+    #@tf.function
     def call(self, inputs):
         x = self.flatten(inputs)
+        print(x.shape)
         x = self.layer_1(x, self.batch_size)
+        print(x.shape)
         x = self.activation_1(x)
+        print(x.shape)
         x = self.layer_2(x, self.batch_size)
+        print(x.shape)
         x = self.activation_2(x)
+        print(x.shape)
         x = self.final_layer(x, self.batch_size)
+        print(x.shape)
         return self.final_layer_activation(x), K.sum(self.losses)
-
-
 
 if __name__ == "__main__":
     from tensorflow.keras.datasets import mnist
@@ -327,9 +332,11 @@ if __name__ == "__main__":
     M = len(x_train) / 32
     model = BayesNN(input_dim=(28,28), output_dim=10)
     y_train = keras.utils.to_categorical(y_train, 10)
-    cce = CategoricalCrossentropy()
-    with tf.GradientTape() as t:
-        predictions, categorical_loss = model(x_train[:128].astype(np.float32))
-        likelihood_loss = cce(y_train[:32].astype(np.float32), predictions)
-    grads = t.gradient(categorical_loss, model.trainable_variables)
-    y_train = keras.utils.to_categorical(y_train, 10)
+    #cce = CategoricalCrossentropy()
+    #with tf.GradientTape() as t:
+    #    predictions, categorical_loss = model(x_train[:128].astype(np.float32))
+    #    likelihood_loss = cce(y_train[:32].astype(np.float32), predictions)
+    #grads = t.gradient(categorical_loss, model.trainable_variables)
+    #y_train = keras.utils.to_categorical(y_train, 10)
+    inp = x_train[:32].astype(np.float32)
+    model(inp)
