@@ -121,16 +121,16 @@ class Bayesion(Layer):
     def __init__(self, units,
                  activation=None,
                  use_bias=True,
-                 prior_mixture_std_1 = np.exp(-1).astype(np.float32),
+                 prior_mixture_std_1 = np.exp(0).astype(np.float32),
                  prior_mixture_std_2 = np.exp(-6).astype(np.float32),
                  prior_mixture_weight = 0.25,
-                 kernel_mean_initializer='glorot_uniform',
+                 kernel_mean_initializer=initializers.RandomUniform(minval=-1, maxval=1),
                  kernel_rho_initializer=initializers.RandomUniform(minval=-5, maxval=-4),
                  kernel_mean_regularizer=None,
                  kernel_rho_regularizer=None,
                  kernel_mean_constraint=None,
                  kernel_rho_constraint=None,
-                 bias_mean_initializer='glorot_uniform',
+                 bias_mean_initializer=initializers.RandomUniform(minval=1, maxval=3),
                  bias_rho_initializer=initializers.RandomUniform(minval=-5, maxval=-4),
                  bias_mean_regularizer=None,
                  bias_rho_regularizer=None,
@@ -266,8 +266,10 @@ class Bayesion(Layer):
         #self.complexity_cost.assign(self.log_posterior - self.log_prior)
         # print("log posterior : {}".format(self.log_posterior))
         # print("log prior : {}".format(self.log_prior))
+        tf.summary.scalar('variational_posterior', self.variational_posterior)
+        tf.summary.scalar('log_prior', self.log_prior)
+        tf.summary.scalar('step', tf.summary.experimental.get_step())
         self.add_loss(self.variational_posterior - self.log_prior)
-
         return output
 
     def compute_output_shape(self, input_shape):
@@ -297,7 +299,7 @@ class Bayesion(Layer):
 
 class BayesNN(tf.keras.Model):
 
-    def __init__(self, input_dim, output_dim, batch_size=32):
+    def __init__(self, input_dim, output_dim, batch_size=128):
         super(BayesNN, self).__init__()
         self.flatten = Flatten(input_shape=input_dim)
         self.layer_1 = Bayesion(400)
@@ -313,17 +315,11 @@ class BayesNN(tf.keras.Model):
     #@tf.function
     def call(self, inputs):
         x = self.flatten(inputs)
-        print(x.shape)
         x = self.layer_1(x, self.batch_size)
-        print(x.shape)
         x = self.activation_1(x)
-        print(x.shape)
         x = self.layer_2(x, self.batch_size)
-        print(x.shape)
         x = self.activation_2(x)
-        print(x.shape)
         x = self.final_layer(x, self.batch_size)
-        print(x.shape)
         return self.final_layer_activation(x), K.sum(self.losses)
 
 if __name__ == "__main__":

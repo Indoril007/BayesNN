@@ -38,10 +38,15 @@ M = N // batch_size
 y_train_logits = keras.utils.to_categorical(y_train, num_classes)
 y_test_logits = keras.utils.to_categorical(y_test, num_classes)
 
-model = BayesNN(input_dim=(28, 28), output_dim=10)
+model = BayesNN(input_dim=(28, 28), output_dim=10, batch_size=batch_size)
 cce = CategoricalCrossentropy()
+optimizer = Adam(learning_rate=0.003)
+acc = tf.keras.metrics.Accuracy()
 
-optimizer = Adam(learning_rate=0.001)
+logdir = './summaries/run' + str(int(time.time()))
+summary_writer = tf.summary.create_file_writer(logdir)
+epochs = 100
+step = tf.Variable(0, name='step', trainable=False, dtype=tf.int64)
 
 @tf.function
 def train_step(images, labels, weight):
@@ -51,22 +56,29 @@ def train_step(images, labels, weight):
         loss = weight * complexity_loss + likelihood_loss
     grads = t.gradient(loss, model.trainable_variables)
     optimizer.apply_gradients(zip(grads, model.trainable_variables))
-    return likelihood_loss, complexity_loss
+    tf.summary.scalar('likelihood_loss', likelihood_loss)
+    tf.summary.scalar('complexity_loss', complexity_loss)
+    return likelihood_loss, 1
 
-summary_writer = tf.summary.create_file_writer('./summaries')
-epochs = 100
-acc = tf.keras.metrics.Accuracy()
+#tf.summary.trace_on(graph=True, profiler=True)
+#traced = False
 with summary_writer.as_default():
     for epoch in range(epochs):
         print("EPOCH {}".format(epoch))
         batches = np.random.permutation(range(N))[:N-(N % batch_size)].reshape(M,batch_size)
         for i in tqdm(range(len(batches))):
+            tf.summary.experimental.set_step(step)
             batch = batches[i]
             #weight = (2**(M - i + 1))/(2**M - 1)
             weight = 1 / M
             l_loss, c_loss = train_step(x_train[batch], y_train_logits[batch], weight)
-            tf.summary.scalar('likelihood_loss', l_loss, step=i)
-            tf.summary.scalar('complexity_loss', c_loss, step=i)
+            #if not traced:
+            #    tf.summary.trace_export(
+            #        name="train_step_traced",
+            #        step=step,
+            #        profiler_outdir=logdir)
+            #    traced = True
+            step.assign_add(1)
 
         logits, complexity_loss = model(x_test)
         prediction = tf.argmax(logits, axis=1, output_type=tf.int32)
