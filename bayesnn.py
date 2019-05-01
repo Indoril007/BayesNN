@@ -60,7 +60,7 @@ def train_step(images, labels, weight):
     optimizer.apply_gradients(zip(grads, model.trainable_variables))
     tf.summary.scalar('likelihood_loss', likelihood_loss)
     tf.summary.scalar('complexity_loss', complexity_loss)
-    return likelihood_loss, 1
+    return likelihood_loss, complexity_loss
 
 #tf.summary.trace_on(graph=True, profiler=True)
 #traced = False

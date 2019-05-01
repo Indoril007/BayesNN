@@ -312,7 +312,6 @@ class BayesNN(tf.keras.Model):
         self.batch_size = batch_size
         self.output_dim = output_dim
 
-
     #@tf.function
     def call(self, inputs, samples=1):
         x = self.flatten(inputs)
