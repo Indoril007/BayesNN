@@ -27,8 +27,11 @@ class Gaussian(object):
     def sigma(self):
         return K.log(1 + K.exp(self.rho))
 
-    def sample(self):
-        epsilon = K.random_normal(self.mu.shape)
+
+    def sample(self, samples=1):
+        samples = K.constant([samples], dtype=np.int32)
+        shape = K.concatenate([samples ,self.mu.shape])
+        epsilon = K.random_normal(shape=shape)
         return self.mu + self.sigma * epsilon
 
     def log_likelihood(self, x):
@@ -244,22 +247,20 @@ class Bayesion(Layer):
     #
     #    return output
 
-    def call(self, inputs, N):
-        input_dim, units  = self.kernel_mean.shape
-
+    def call(self, inputs, samples=1):
         # epsilon should be resampled for each input
-        self.kernel = self.kernel_distribution.sample()
-        self.variational_posterior = K.sum(self.kernel_distribution.log_likelihood(self.kernel))
-        self.log_prior = K.sum(self.prior_distribution.log_prob(self.kernel))
+        self.kernel = self.kernel_distribution.sample(samples)
+        self.variational_posterior = K.sum(self.kernel_distribution.log_likelihood(self.kernel), axis=[1,2])
+        self.log_prior = K.sum(self.prior_distribution.log_prob(self.kernel), axis=[1,2])
 
-        output = K.dot(inputs, self.kernel)
+        output = K.batch_dot(inputs, self.kernel)
 
         if self.use_bias:
-            self.bias = self.bias_distribution.sample()
-            self.variational_posterior += K.sum(self.bias_distribution.log_likelihood(self.bias))
-            self.log_prior += K.sum(self.prior_distribution.log_prob(self.bias))
+            self.bias = self.bias_distribution.sample(samples)
+            self.variational_posterior += K.sum(self.bias_distribution.log_likelihood(self.bias), axis=[1])
+            self.log_prior += K.sum(self.prior_distribution.log_prob(self.bias), axis=[1])
 
-            output = K.bias_add(output, self.bias)
+            output += K.reshape(self.bias, (samples, 1, self.units))
         if self.activation is not None:
             output = self.activation(output)
 
@@ -311,20 +312,17 @@ class BayesNN(tf.keras.Model):
 
 
     #@tf.function
-    def call(self, inputs):
+    def call(self, inputs, samples=1):
         x = self.flatten(inputs)
-        print(x.shape)
-        x = self.layer_1(x, self.batch_size)
-        print(x.shape)
+        batch_size, features = x.shape
+        x = K.reshape(x, (1, batch_size, features))
+        x = K.repeat_elements(x, samples, axis=0)
+        x = self.layer_1(x, samples)
         x = self.activation_1(x)
-        print(x.shape)
-        x = self.layer_2(x, self.batch_size)
-        print(x.shape)
+        x = self.layer_2(x, samples)
         x = self.activation_2(x)
-        print(x.shape)
-        x = self.final_layer(x, self.batch_size)
-        print(x.shape)
-        return self.final_layer_activation(x), K.sum(self.losses)
+        x = self.final_layer(x, samples)
+        return self.final_layer_activation(x), K.sum(self.losses, axis=0)
 
 if __name__ == "__main__":
     from tensorflow.keras.datasets import mnist
@@ -339,4 +337,4 @@ if __name__ == "__main__":
     #grads = t.gradient(categorical_loss, model.trainable_variables)
     #y_train = keras.utils.to_categorical(y_train, 10)
     inp = x_train[:32].astype(np.float32)
-    model(inp)
+    model(inp, samples=5)

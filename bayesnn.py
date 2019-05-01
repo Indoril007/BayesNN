@@ -46,7 +46,9 @@ optimizer = Adam(learning_rate=0.001)
 @tf.function
 def train_step(images, labels, weight):
     with tf.GradientTape() as t:
-        predictions, complexity_loss = model(images)
+        predictions, complexity_losses = model(images, samples=5)
+        predictions = tf.reduce_mean(predictions, axis=0)
+        complexity_loss = tf.reduce_mean(complexity_losses, axis=0)
         likelihood_loss = cce(labels, predictions)
         loss = weight * complexity_loss + likelihood_loss
     grads = t.gradient(loss, model.trainable_variables)
@@ -68,7 +70,9 @@ with summary_writer.as_default():
             tf.summary.scalar('likelihood_loss', l_loss, step=i)
             tf.summary.scalar('complexity_loss', c_loss, step=i)
 
-        logits, complexity_loss = model(x_test)
+        logits, complexity_loss = model(x_test, samples=5)
+        logits = tf.reduce_mean(logits, axis=0)
+        complexity_loss = tf.reduce_mean(complexity_loss, axis=0)
         prediction = tf.argmax(logits, axis=1, output_type=tf.int32)
         val_acc = acc(prediction, y_test)
         print("Validation accuracy: {}".format(val_acc))
