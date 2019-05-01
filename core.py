@@ -267,9 +267,8 @@ class Bayesion(Layer):
         #self.complexity_cost.assign(self.log_posterior - self.log_prior)
         # print("log posterior : {}".format(self.log_posterior))
         # print("log prior : {}".format(self.log_prior))
-        tf.summary.scalar('variational_posterior', self.variational_posterior)
-        tf.summary.scalar('log_prior', self.log_prior)
-        tf.summary.scalar('step', tf.summary.experimental.get_step())
+        tf.summary.scalar('mean_variational_posterior', K.mean(self.variational_posterior))
+        tf.summary.scalar('mean_log_prior', K.mean(self.log_prior))
         self.add_loss(self.variational_posterior - self.log_prior)
         return output
 

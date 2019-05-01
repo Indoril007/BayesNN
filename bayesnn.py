@@ -17,6 +17,7 @@ import os
 from tensorflow.python.ops import control_flow_util
 control_flow_util.ENABLE_CONTROL_FLOW_V2 = True
 
+SAMPLES = 1
 batch_size = 128
 num_classes = 10
 epochs = 100
@@ -48,19 +49,27 @@ summary_writer = tf.summary.create_file_writer(logdir)
 epochs = 100
 step = tf.Variable(0, name='step', trainable=False, dtype=tf.int64)
 
-@tf.function
+#@tf.function
 def train_step(images, labels, weight):
     with tf.GradientTape() as t:
-        predictions, complexity_losses = model(images, samples=5)
-        predictions = tf.reduce_mean(predictions, axis=0)
-        complexity_loss = tf.reduce_mean(complexity_losses, axis=0)
-        likelihood_loss = cce(labels, predictions)
-        loss = weight * complexity_loss + likelihood_loss
+        predictions, complexity_loss = model(images, samples=SAMPLES)
+        # predictions = tf.reduce_mean(predictions, axis=0)
+        # complexity_loss = tf.reduce_mean(complexity_losses, axis=0)
+        likelihood_losses = tf.TensorArray(tf.float32, predictions.shape[0], clear_after_read=False)
+        losses = tf.TensorArray(tf.float32, predictions.shape[0])
+        for i in tf.range(predictions.shape[0]):
+            likelihood_losses = likelihood_losses.write(i, cce(labels, predictions[i]))
+            losses = losses.write(i, weight * complexity_loss[i] + likelihood_losses.read(i))
+
+        likelihood_losses = likelihood_losses.stack()
+        losses = tf.reshape(losses.stack(), (-1,1))
+        loss = tf.reduce_mean(losses)
+
     grads = t.gradient(loss, model.trainable_variables)
     optimizer.apply_gradients(zip(grads, model.trainable_variables))
-    tf.summary.scalar('likelihood_loss', likelihood_loss)
-    tf.summary.scalar('complexity_loss', complexity_loss)
-    return likelihood_loss, complexity_loss
+    tf.summary.scalar('likelihood_loss', tf.reduce_mean(likelihood_losses))
+    tf.summary.scalar('complexity_loss', tf.reduce_mean(complexity_loss))
+    return likelihood_losses, complexity_loss
 
 #tf.summary.trace_on(graph=True, profiler=True)
 #traced = False
@@ -82,7 +91,7 @@ with summary_writer.as_default():
             #    traced = True
             step.assign_add(1)
 
-        logits, complexity_loss = model(x_test, samples=5)
+        logits, complexity_loss = model(x_test, samples=SAMPLES)
         logits = tf.reduce_mean(logits, axis=0)
         complexity_loss = tf.reduce_mean(complexity_loss, axis=0)
         prediction = tf.argmax(logits, axis=1, output_type=tf.int32)
