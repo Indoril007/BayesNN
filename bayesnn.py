@@ -17,6 +17,11 @@ import os
 from tensorflow.python.ops import control_flow_util
 control_flow_util.ENABLE_CONTROL_FLOW_V2 = True
 
+import argparse
+parser = argparse.ArgumentParser()
+parser.add_argument("-n", "--name")
+args = parser.parse_args()
+
 batch_size = 128
 num_classes = 10
 epochs = 100
@@ -43,12 +48,12 @@ cce = CategoricalCrossentropy()
 optimizer = Adam(learning_rate=0.003)
 acc = tf.keras.metrics.Accuracy()
 
-logdir = './summaries/run' + str(int(time.time()))
+logdir = './summaries/run-' + args.name + '-' + str(int(time.time()))
 summary_writer = tf.summary.create_file_writer(logdir)
 epochs = 100
 step = tf.Variable(0, name='step', trainable=False, dtype=tf.int64)
 
-@tf.function
+#@tf.function
 def train_step(images, labels, weight):
     with tf.GradientTape() as t:
         predictions, complexity_loss = model(images)
