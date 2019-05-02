@@ -56,9 +56,7 @@ def train_step(images, labels, weight):
         loss = weight * complexity_loss + likelihood_loss
     grads = t.gradient(loss, model.trainable_variables)
     optimizer.apply_gradients(zip(grads, model.trainable_variables))
-    tf.summary.scalar('likelihood_loss', likelihood_loss)
-    tf.summary.scalar('complexity_loss', complexity_loss)
-    return likelihood_loss, 1
+    return likelihood_loss, complexity_loss
 
 #tf.summary.trace_on(graph=True, profiler=True)
 #traced = False
@@ -72,6 +70,8 @@ with summary_writer.as_default():
             #weight = (2**(M - i + 1))/(2**M - 1)
             weight = 1 / M
             l_loss, c_loss = train_step(x_train[batch], y_train_logits[batch], weight)
+            tf.summary.scalar('likelihood_loss', l_loss)
+            tf.summary.scalar('complexity_loss', c_loss)
             #if not traced:
             #    tf.summary.trace_export(
             #        name="train_step_traced",
