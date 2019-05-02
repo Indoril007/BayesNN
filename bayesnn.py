@@ -17,6 +17,12 @@ import os
 from tensorflow.python.ops import control_flow_util
 control_flow_util.ENABLE_CONTROL_FLOW_V2 = True
 
+import argparse
+parser = argparse.ArgumentParser()
+parser.add_argument("-n", "--name")
+args = parser.parse_args()
+
+
 SAMPLES = 1
 batch_size = 128
 num_classes = 10
@@ -44,32 +50,34 @@ cce = CategoricalCrossentropy()
 optimizer = Adam(learning_rate=0.003)
 acc = tf.keras.metrics.Accuracy()
 
-logdir = './summaries/run' + str(int(time.time()))
+logdir = './summaries/run-' + args.name + '-' + str(int(time.time()))
 summary_writer = tf.summary.create_file_writer(logdir)
 epochs = 100
 step = tf.Variable(0, name='step', trainable=False, dtype=tf.int64)
 
-#@tf.function
+@tf.function
 def train_step(images, labels, weight):
     with tf.GradientTape() as t:
         predictions, complexity_loss = model(images, samples=SAMPLES)
         # predictions = tf.reduce_mean(predictions, axis=0)
         # complexity_loss = tf.reduce_mean(complexity_losses, axis=0)
-        likelihood_losses = tf.TensorArray(tf.float32, predictions.shape[0], clear_after_read=False)
-        losses = tf.TensorArray(tf.float32, predictions.shape[0])
-        for i in tf.range(predictions.shape[0]):
-            likelihood_losses = likelihood_losses.write(i, cce(labels, predictions[i]))
-            losses = losses.write(i, weight * complexity_loss[i] + likelihood_losses.read(i))
+        #likelihood_losses = tf.TensorArray(tf.float32, predictions.shape[0], clear_after_read=False)
+        #losses = tf.TensorArray(tf.float32, predictions.shape[0])
+        #for i in tf.range(predictions.shape[0]):
+        #    likelihood_losses = likelihood_losses.write(i, cce(labels, predictions[i]))
+        #    losses = losses.write(i, weight * complexity_loss[i] + likelihood_losses.read(i))
 
-        likelihood_losses = likelihood_losses.stack()
-        losses = tf.reshape(losses.stack(), (-1,1))
-        loss = tf.reduce_mean(losses)
+        #likelihood_losses = likelihood_losses.stack()
+        #losses = tf.reshape(losses.stack(), (-1,1))
+        #loss = tf.reduce_mean(losses)
+        likelihood_loss = cce(labels, predictions[0])
+        loss = weight * complexity_loss[0] + likelihood_loss
 
     grads = t.gradient(loss, model.trainable_variables)
     optimizer.apply_gradients(zip(grads, model.trainable_variables))
-    tf.summary.scalar('likelihood_loss', tf.reduce_mean(likelihood_losses))
+    tf.summary.scalar('likelihood_loss', tf.reduce_mean(likelihood_loss))
     tf.summary.scalar('complexity_loss', tf.reduce_mean(complexity_loss))
-    return likelihood_losses, complexity_loss
+    return likelihood_loss, complexity_loss
 
 #tf.summary.trace_on(graph=True, profiler=True)
 #traced = False
