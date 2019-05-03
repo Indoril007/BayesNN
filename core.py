@@ -166,14 +166,13 @@ class Bayesion(Layer):
 
     def build(self, input_shape):
         assert len(input_shape) >= 2
-        input_dim = input_shape[-1]
+        input_dim = input_shape.as_list()[-1]
 
         self.kernel_mean = self.add_weight(shape=(input_dim, self.units),
                                       initializer=self.kernel_mean_initializer,
                                       name='kernel_mean',
                                       regularizer=self.kernel_mean_regularizer,
                                       constraint=self.kernel_mean_constraint)
-
 
         # Standard Deviation of weights claculated as log(1 + exp(rho))
         self.kernel_rho = self.add_weight(shape=(input_dim, self.units),
@@ -268,7 +267,6 @@ class Bayesion(Layer):
         # print("log prior : {}".format(self.log_prior))
         tf.summary.scalar('variational_posterior', self.variational_posterior)
         tf.summary.scalar('log_prior', self.log_prior)
-        tf.summary.scalar('step', tf.summary.experimental.get_step())
         self.add_loss(self.variational_posterior - self.log_prior)
         return output
 
@@ -320,7 +318,8 @@ class BayesNN(tf.keras.Model):
         x = self.layer_2(x, self.batch_size)
         x = self.activation_2(x)
         x = self.final_layer(x, self.batch_size)
-        return self.final_layer_activation(x), K.sum(self.losses)
+        #return self.final_layer_activation(x), K.sum(self.losses)
+        return x, K.sum(self.losses)
 
 if __name__ == "__main__":
     from tensorflow.keras.datasets import mnist

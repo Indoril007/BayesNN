@@ -6,6 +6,7 @@ import tensorflow as tf
 import tensorflow.keras as keras
 from tensorflow.keras.datasets import mnist
 from tensorflow.keras.optimizers import Adam
+from tensorflow.train import AdamOptimizer
 from tensorflow.keras.losses import CategoricalCrossentropy
 from tensorflow.keras.preprocessing.image import ImageDataGenerator
 from tensorflow.keras.models import Sequential
@@ -13,6 +14,9 @@ from tensorflow.keras.layers import Dense, Dropout, Activation, Flatten
 from tensorflow.keras.layers import Conv2D, MaxPooling2D
 from core import BayesNN
 import os
+import sys
+
+np.set_printoptions(threshold=sys.maxsize)
 
 from tensorflow.python.ops import control_flow_util
 control_flow_util.ENABLE_CONTROL_FLOW_V2 = True
@@ -40,50 +44,105 @@ y_test_logits = keras.utils.to_categorical(y_test, num_classes)
 
 model = BayesNN(input_dim=(28, 28), output_dim=10, batch_size=batch_size)
 cce = CategoricalCrossentropy()
-optimizer = Adam(learning_rate=0.003)
+optimizer = AdamOptimizer(learning_rate=0.003)
 acc = tf.keras.metrics.Accuracy()
 
+in_ph = tf.placeholder(name='input', shape=(None, 28, 28), dtype=tf.float32)
+labels_ph = tf.placeholder(name='labels', shape=(None), dtype=tf.int32)
+
+predictions, complexity_loss = model(in_ph)
+#likelihood_loss = cce(labels_ph, predictions)
+likelihood_loss = tf.losses.sparse_softmax_cross_entropy(labels_ph, predictions)
+
+prediction = tf.argmax(predictions, axis=1, output_type=tf.int32)
+#val_acc = acc(prediction, y_test)
+#val_acc, _ = tf.metrics.accuracy(prediction, y_test)
+correct_prediction = tf.equal(prediction, y_test)
+val_acc = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
+
+weight = 1/M
+loss = weight * complexity_loss + likelihood_loss
+step = tf.train.get_or_create_global_step()
+grads = optimizer.compute_gradients(loss)
+update = optimizer.minimize(loss, global_step=step)
+
+tf.summary.scalar('complexity_loss', complexity_loss)
+tf.summary.scalar('likelihood_loss', likelihood_loss)
+tf.summary.scalar('loss', loss)
+
+init = tf.global_variables_initializer()
+
+summaries_op = tf.summary.merge_all()
+
+print(tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES))
+
 logdir = './summaries/run' + str(int(time.time()))
-summary_writer = tf.summary.create_file_writer(logdir)
+summary_writer = tf.summary.FileWriter(logdir)
 epochs = 100
-step = tf.Variable(0, name='step', trainable=False, dtype=tf.int64)
 
-@tf.function
-def train_step(images, labels, weight):
-    with tf.GradientTape() as t:
-        predictions, complexity_loss = model(images)
-        likelihood_loss = cce(labels, predictions)
-        loss = weight * complexity_loss + likelihood_loss
-    grads = t.gradient(loss, model.trainable_variables)
-    optimizer.apply_gradients(zip(grads, model.trainable_variables))
-    tf.summary.scalar('likelihood_loss', likelihood_loss)
-    tf.summary.scalar('complexity_loss', complexity_loss)
-    return likelihood_loss, 1
 
-#tf.summary.trace_on(graph=True, profiler=True)
-#traced = False
-with summary_writer.as_default():
+with tf.Session() as sess:
+    sess.run(init)
+
     for epoch in range(epochs):
         print("EPOCH {}".format(epoch))
-        batches = np.random.permutation(range(N))[:N-(N % batch_size)].reshape(M,batch_size)
+        batches = np.random.permutation(range(N))[:N-(N % batch_size)].reshape(M, batch_size)
         for i in tqdm(range(len(batches))):
-            tf.summary.experimental.set_step(step)
             batch = batches[i]
-            #weight = (2**(M - i + 1))/(2**M - 1)
-            weight = 1 / M
-            l_loss, c_loss = train_step(x_train[batch], y_train_logits[batch], weight)
-            #if not traced:
-            #    tf.summary.trace_export(
-            #        name="train_step_traced",
-            #        step=step,
-            #        profiler_outdir=logdir)
-            #    traced = True
-            step.assign_add(1)
+            feed_dict = {in_ph : x_train[batch], labels_ph : y_train[batch]}
+            #pred, labels, l_loss = sess.run([predictions, labels_ph, likelihood_loss], feed_dict)
+            #print("LIKELIHOOD_LOSS")
+            #print(l_loss)
+            #print("LABELS")
+            #print(labels)
+            #print("pred")
+            #print(pred)
+            summaries, _ = sess.run([summaries_op, update], feed_dict)
+            summary_writer.add_summary(summaries, global_step=i+epoch*len(batches))
 
-        logits, complexity_loss = model(x_test)
-        prediction = tf.argmax(logits, axis=1, output_type=tf.int32)
-        val_acc = acc(prediction, y_test)
-        print("Validation accuracy: {}".format(val_acc))
+        #     if (i == 3):
+        #         break
+        # break
+        print("Validation accuracy: {}".format(sess.run(val_acc, {in_ph : x_test})))
+
+
+
+# @tf.function
+# def train_step(images, labels, weight):
+#     with tf.GradientTape() as t:
+#         predictions, complexity_loss = model(images)
+#         likelihood_loss = cce(labels, predictions)
+#         loss = weight * complexity_loss + likelihood_loss
+#     grads = t.gradient(loss, model.trainable_variables)
+#     optimizer.apply_gradients(zip(grads, model.trainable_variables))
+#     tf.summary.scalar('likelihood_loss', likelihood_loss)
+#     tf.summary.scalar('complexity_loss', complexity_loss)
+#     return likelihood_loss, 1
+#
+# #tf.summary.trace_on(graph=True, profiler=True)
+# #traced = False
+# with summary_writer.as_default():
+#     for epoch in range(epochs):
+#         print("EPOCH {}".format(epoch))
+#         batches = np.random.permutation(range(N))[:N-(N % batch_size)].reshape(M,batch_size)
+#         for i in tqdm(range(len(batches))):
+#             tf.summary.experimental.set_step(step)
+#             batch = batches[i]
+#             #weight = (2**(M - i + 1))/(2**M - 1)
+#             weight = 1 / M
+#             l_loss, c_loss = train_step(x_train[batch], y_train_logits[batch], weight)
+#             #if not traced:
+#             #    tf.summary.trace_export(
+#             #        name="train_step_traced",
+#             #        step=step,
+#             #        profiler_outdir=logdir)
+#             #    traced = True
+#             step.assign_add(1)
+#
+#         logits, complexity_loss = model(x_test)
+#         prediction = tf.argmax(logits, axis=1, output_type=tf.int32)
+#        val_acc = acc(prediction, y_test)
+#        print("Validation accuracy: {}".format(val_acc))
 
 # model = Sequential()
 #
