@@ -90,19 +90,9 @@ with tf.Session() as sess:
         for i in tqdm(range(len(batches))):
             batch = batches[i]
             feed_dict = {in_ph : x_train[batch], labels_ph : y_train[batch]}
-            #pred, labels, l_loss = sess.run([predictions, labels_ph, likelihood_loss], feed_dict)
-            #print("LIKELIHOOD_LOSS")
-            #print(l_loss)
-            #print("LABELS")
-            #print(labels)
-            #print("pred")
-            #print(pred)
             summaries, _ = sess.run([summaries_op, update], feed_dict)
             summary_writer.add_summary(summaries, global_step=i+epoch*len(batches))
 
-        #     if (i == 3):
-        #         break
-        # break
         print("Validation accuracy: {}".format(sess.run(val_acc, {in_ph : x_test})))
 
 
