@@ -12,7 +12,7 @@ from tensorflow.keras.preprocessing.image import ImageDataGenerator
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Dense, Dropout, Activation, Flatten
 from tensorflow.keras.layers import Conv2D, MaxPooling2D
-from core import BayesNN
+from core import BayesNN, average_gradients
 import os
 import sys
 
@@ -21,9 +21,15 @@ np.set_printoptions(threshold=sys.maxsize)
 from tensorflow.python.ops import control_flow_util
 control_flow_util.ENABLE_CONTROL_FLOW_V2 = True
 
+import argparse
+parser = argparse.ArgumentParser()
+parser.add_argument("-n", "--name")
+args = parser.parse_args()
+
 batch_size = 128
+samples = 3
 num_classes = 10
-epochs = 100
+epochs = 1000
 data_augmentation = False
 bayesion = False
 num_predictions = 20
@@ -44,39 +50,53 @@ y_test_logits = keras.utils.to_categorical(y_test, num_classes)
 
 model = BayesNN(input_dim=(28, 28), output_dim=10, batch_size=batch_size)
 cce = CategoricalCrossentropy()
-optimizer = AdamOptimizer(learning_rate=0.003)
+optimizer = AdamOptimizer(learning_rate=0.0003)
 acc = tf.keras.metrics.Accuracy()
 
 in_ph = tf.placeholder(name='input', shape=(None, 28, 28), dtype=tf.float32)
 labels_ph = tf.placeholder(name='labels', shape=(None), dtype=tf.int32)
 
-predictions, complexity_loss = model(in_ph)
-#likelihood_loss = cce(labels_ph, predictions)
-likelihood_loss = tf.losses.sparse_softmax_cross_entropy(labels_ph, predictions)
+sampled_predictions = []
+sampled_complexity_losses = []
+sampled_likelihood_losses = []
+sampled_losses = []
+sampled_grads = []
+for i in range(samples):
+    predictions, complexity_loss = model(in_ph)
+    likelihood_loss = tf.losses.sparse_softmax_cross_entropy(labels_ph, predictions)
+    weight = 1/M
+    loss = weight * complexity_loss + likelihood_loss
+    grad = optimizer.compute_gradients(loss)
+
+    sampled_predictions.append(predictions)
+    sampled_complexity_losses.append(complexity_loss)
+    sampled_likelihood_losses.append(likelihood_loss)
+    sampled_losses.append(loss)
+    sampled_grads.append(grad)
+
+avg_prediction = tf.reduce_mean(tf.stack(sampled_predictions), axis=0)
+avg_complexity_loss = tf.reduce_mean(tf.stack(sampled_complexity_losses))
+avg_likelihood_loss = tf.reduce_mean(tf.stack(sampled_likelihood_losses))
+avg_loss = tf.reduce_mean(tf.stack(sampled_losses))
+avg_grads = average_gradients(sampled_grads)
+
 
 prediction = tf.argmax(predictions, axis=1, output_type=tf.int32)
-#val_acc = acc(prediction, y_test)
-#val_acc, _ = tf.metrics.accuracy(prediction, y_test)
 correct_prediction = tf.equal(prediction, y_test)
 val_acc = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
 
-weight = 1/M
-loss = weight * complexity_loss + likelihood_loss
 step = tf.train.get_or_create_global_step()
-grads = optimizer.compute_gradients(loss)
-update = optimizer.minimize(loss, global_step=step)
+update = optimizer.apply_gradients(avg_grads, global_step=step)
 
-tf.summary.scalar('complexity_loss', complexity_loss)
-tf.summary.scalar('likelihood_loss', likelihood_loss)
-tf.summary.scalar('loss', loss)
+tf.summary.scalar('avg_complexity_loss', avg_complexity_loss)
+tf.summary.scalar('avg_likelihood_loss', avg_likelihood_loss)
+tf.summary.scalar('avg_loss', avg_loss)
 
 init = tf.global_variables_initializer()
 
 summaries_op = tf.summary.merge_all()
 
-print(tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES))
-
-logdir = './summaries/run' + str(int(time.time()))
+logdir = './summaries/run-' + args.name + '-' + str(int(time.time()))
 summary_writer = tf.summary.FileWriter(logdir)
 epochs = 100
 
