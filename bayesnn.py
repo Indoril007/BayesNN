@@ -27,7 +27,7 @@ parser.add_argument("-n", "--name")
 args = parser.parse_args()
 
 batch_size = 128
-samples = 3
+samples = 10
 num_classes = 10
 epochs = 1000
 data_augmentation = False
@@ -50,7 +50,7 @@ y_test_logits = keras.utils.to_categorical(y_test, num_classes)
 
 model = BayesNN(input_dim=(28, 28), output_dim=10, batch_size=batch_size)
 cce = CategoricalCrossentropy()
-optimizer = AdamOptimizer(learning_rate=0.0003)
+optimizer = AdamOptimizer(learning_rate=0.001)
 acc = tf.keras.metrics.Accuracy()
 
 in_ph = tf.placeholder(name='input', shape=(None, 28, 28), dtype=tf.float32)
@@ -74,7 +74,12 @@ for i in range(samples):
     sampled_losses.append(loss)
     sampled_grads.append(grad)
 
-avg_prediction = tf.reduce_mean(tf.stack(sampled_predictions), axis=0)
+stacked_predictions = tf.stack(sampled_predictions)
+avg_prediction = tf.reduce_mean(stacked_predictions, axis=0)
+std_predictions = tf.math.reduce_std(tf.nn.softmax(stacked_predictions), axis=0)
+std_sum_predictions = tf.reduce_sum(std_predictions, axis=1)
+_, most_confusing = tf.math.top_k(std_sum_predictions, k = 10)
+avg_std_sum_predictions = tf.reduce_mean(std_sum_predictions, axis=0)
 avg_complexity_loss = tf.reduce_mean(tf.stack(sampled_complexity_losses))
 avg_likelihood_loss = tf.reduce_mean(tf.stack(sampled_likelihood_losses))
 avg_loss = tf.reduce_mean(tf.stack(sampled_losses))
@@ -90,6 +95,7 @@ update = optimizer.apply_gradients(avg_grads, global_step=step)
 
 tf.summary.scalar('avg_complexity_loss', avg_complexity_loss)
 tf.summary.scalar('avg_likelihood_loss', avg_likelihood_loss)
+tf.summary.scalar('avg_std_sum_predictions', avg_std_sum_predictions)
 tf.summary.scalar('avg_loss', avg_loss)
 
 init = tf.global_variables_initializer()
@@ -112,8 +118,9 @@ with tf.Session() as sess:
             feed_dict = {in_ph : x_train[batch], labels_ph : y_train[batch]}
             summaries, _ = sess.run([summaries_op, update], feed_dict)
             summary_writer.add_summary(summaries, global_step=i+epoch*len(batches))
-
-        print("Validation accuracy: {}".format(sess.run(val_acc, {in_ph : x_test})))
+        va, top_confusing = sess.run([val_acc, most_confusing], {in_ph : x_test, labels_ph : y_test})
+        print("Validation accuracy: {}".format(va))
+        print("Most confused: {}".format(top_confusing))
 
 
 
