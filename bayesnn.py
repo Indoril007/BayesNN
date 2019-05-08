@@ -26,6 +26,8 @@ parser = argparse.ArgumentParser()
 parser.add_argument("-n", "--name")
 args = parser.parse_args()
 
+EPS = 1e-6
+
 batch_size = 128
 samples = 10
 num_classes = 10
@@ -38,6 +40,10 @@ model_name = 'keras_cifar10_trained_model.h5'
 
 # The data, split between train and test sets:
 (x_train, y_train), (x_test, y_test) = mnist.load_data()
+#x_mean = np.mean(x_train, axis = 0)
+#x_std = np.std(x_train, axis = 0)
+#x_train = (x_train.astype(np.float32) - x_mean) / (x_std + EPS)
+#x_test = (x_test.astype(np.float32) - x_mean) / (x_std + EPS)
 x_train = x_train.astype(np.float32)
 x_test = x_test.astype(np.float32)
 
@@ -75,11 +81,17 @@ for i in range(samples):
     sampled_grads.append(grad)
 
 stacked_predictions = tf.stack(sampled_predictions)
-avg_prediction = tf.reduce_mean(stacked_predictions, axis=0)
-std_predictions = tf.math.reduce_std(tf.nn.softmax(stacked_predictions), axis=0)
-std_sum_predictions = tf.reduce_sum(std_predictions, axis=1)
-_, most_confusing = tf.math.top_k(std_sum_predictions, k = 10)
-avg_std_sum_predictions = tf.reduce_mean(std_sum_predictions, axis=0)
+#avg_prediction = tf.reduce_mean(stacked_predictions, axis=0)
+#std_predictions = tf.math.reduce_std(tf.nn.softmax(stacked_predictions), axis=0)
+#std_sum_predictions = tf.reduce_sum(std_predictions, axis=1)
+#_, most_confusing = tf.math.top_k(std_sum_predictions, k = 10)
+#avg_std_sum_predictions = tf.reduce_mean(std_sum_predictions, axis=0)
+avg_prediction = tf.reduce_mean(tf.nn.softmax(stacked_predictions), axis=0)
+entropy = -tf.reduce_sum((avg_prediction * tf.log(avg_prediction+EPS)), axis=1)
+avg_entropy = tf.reduce_mean(entropy)
+_, most_confusing = tf.math.top_k(entropy, k = 10)
+print(entropy)
+
 avg_complexity_loss = tf.reduce_mean(tf.stack(sampled_complexity_losses))
 avg_likelihood_loss = tf.reduce_mean(tf.stack(sampled_likelihood_losses))
 avg_loss = tf.reduce_mean(tf.stack(sampled_losses))
@@ -95,7 +107,8 @@ update = optimizer.apply_gradients(avg_grads, global_step=step)
 
 tf.summary.scalar('avg_complexity_loss', avg_complexity_loss)
 tf.summary.scalar('avg_likelihood_loss', avg_likelihood_loss)
-tf.summary.scalar('avg_std_sum_predictions', avg_std_sum_predictions)
+#tf.summary.scalar('avg_std_sum_predictions', avg_std_sum_predictions)
+tf.summary.scalar('avg_entropy', avg_entropy)
 tf.summary.scalar('avg_loss', avg_loss)
 
 init = tf.global_variables_initializer()
@@ -103,7 +116,7 @@ init = tf.global_variables_initializer()
 summaries_op = tf.summary.merge_all()
 
 logdir = './summaries/run-' + args.name + '-' + str(int(time.time()))
-summary_writer = tf.summary.FileWriter(logdir)
+summary_writer = tf.summary.FileWriter(logdir, tf.get_default_graph())
 epochs = 100
 
 
@@ -118,9 +131,10 @@ with tf.Session() as sess:
             feed_dict = {in_ph : x_train[batch], labels_ph : y_train[batch]}
             summaries, _ = sess.run([summaries_op, update], feed_dict)
             summary_writer.add_summary(summaries, global_step=i+epoch*len(batches))
-        va, top_confusing = sess.run([val_acc, most_confusing], {in_ph : x_test, labels_ph : y_test})
+        va, top_confusing, avp = sess.run([val_acc, most_confusing, avg_prediction], {in_ph: x_test, labels_ph: y_test})
         print("Validation accuracy: {}".format(va))
         print("Most confused: {}".format(top_confusing))
+        print("Most confused vals: {}".format(avp[top_confusing]))
 
 
 

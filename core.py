@@ -180,7 +180,7 @@ class Bayesion(Layer):
                  kernel_rho_regularizer=None,
                  kernel_mean_constraint=None,
                  kernel_rho_constraint=None,
-                 bias_mean_initializer=initializers.RandomUniform(minval=1, maxval=3),
+                 bias_mean_initializer=initializers.RandomUniform(minval=1, maxval=2),
                  bias_rho_initializer=initializers.RandomUniform(minval=-5, maxval=-4),
                  bias_mean_regularizer=None,
                  bias_rho_regularizer=None,
