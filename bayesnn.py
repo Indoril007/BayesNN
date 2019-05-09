@@ -5,6 +5,7 @@ import numpy as np
 import tensorflow as tf
 import tensorflow.keras as keras
 from tensorflow.keras.datasets import mnist
+from tensorflow.keras import initializers
 from tensorflow.keras.optimizers import Adam
 from tensorflow.train import AdamOptimizer
 from tensorflow.keras.losses import CategoricalCrossentropy
@@ -24,19 +25,47 @@ control_flow_util.ENABLE_CONTROL_FLOW_V2 = True
 import argparse
 parser = argparse.ArgumentParser()
 parser.add_argument("-n", "--name")
+parser.add_argument("-s", "--samples", type=int, default=1)
+parser.add_argument("-l", "--learningrate", type=float, default=0.001)
+parser.add_argument("-a", "--activation", type=str, default="relu")
+parser.add_argument("-c", "--batches", type=int, default=128)
+parser.add_argument("-p", "--prior", nargs='+', default=[0, -6, 0.25])
+parser.add_argument("-k", "--kernel", nargs='+', default=[-1, 1, -5, -4])
+parser.add_argument("-b", "--bias", nargs='+', default=[-1, 1, -5, -4])
 args = parser.parse_args()
+
+print(args)
 
 EPS = 1e-6
 
-batch_size = 128
-samples = 10
+input_dim=(28,28)
+output_dim=10
+batch_size = args.batches
+samples = int(args.samples)
+learning_rate = args.learningrate
+summaries_dir = './summaries/run-' + args.name + '-' + str(int(time.time()))
+log_dir = './logs/run-' + args.name + '-' + str(int(time.time())) + '.txt'
+with open(log_dir, 'w') as log_file:
+    log_file.write(str(args) + '\n')
 num_classes = 10
 epochs = 1000
-data_augmentation = False
-bayesion = False
-num_predictions = 20
-save_dir = os.path.join(os.getcwd(), 'saved_models')
-model_name = 'keras_cifar10_trained_model.h5'
+
+model = BayesNN(input_dim,
+                output_dim,
+                batch_size=batch_size,
+                activation = args.activation,
+                prior_mixture_std_1 = np.exp(float(args.prior[0])).astype(np.float32),
+                prior_mixture_std_2 = np.exp(float(args.prior[1])).astype(np.float32),
+                prior_mixture_weight = float(args.prior[2]),
+                kernel_mean_initializer=initializers.RandomUniform(minval=float(args.kernel[0]),
+                                                                   maxval=float(args.kernel[1])),
+                kernel_rho_initializer=initializers.RandomUniform(minval=float(args.kernel[2]),
+                                                                  maxval=float(args.kernel[3])),
+                bias_mean_initializer=initializers.RandomUniform(minval=float(args.bias[0]),
+                                                                 maxval=float(args.bias[1])),
+                bias_rho_initializer=initializers.RandomUniform(minval=float(args.bias[2]),
+                                                                maxval=float(args.bias[3])))
+
 
 # The data, split between train and test sets:
 (x_train, y_train), (x_test, y_test) = mnist.load_data()
@@ -54,9 +83,9 @@ M = N // batch_size
 y_train_logits = keras.utils.to_categorical(y_train, num_classes)
 y_test_logits = keras.utils.to_categorical(y_test, num_classes)
 
-model = BayesNN(input_dim=(28, 28), output_dim=10, batch_size=batch_size)
 cce = CategoricalCrossentropy()
-optimizer = AdamOptimizer(learning_rate=0.001)
+optimizer = AdamOptimizer(learning_rate=learning_rate)
+#optimizer = tf.contrib.opt.AdamWOptimizer(weight_decay=0.00001, learning_rate=learning_rate)
 acc = tf.keras.metrics.Accuracy()
 
 in_ph = tf.placeholder(name='input', shape=(None, 28, 28), dtype=tf.float32)
@@ -67,30 +96,32 @@ sampled_complexity_losses = []
 sampled_likelihood_losses = []
 sampled_losses = []
 sampled_grads = []
-for i in range(samples):
-    predictions, complexity_loss = model(in_ph)
-    likelihood_loss = tf.losses.sparse_softmax_cross_entropy(labels_ph, predictions)
-    weight = 1/M
-    loss = weight * complexity_loss + likelihood_loss
-    grad = optimizer.compute_gradients(loss)
 
+for i in range(50):
+    predictions, complexity_loss = model(in_ph)
     sampled_predictions.append(predictions)
-    sampled_complexity_losses.append(complexity_loss)
-    sampled_likelihood_losses.append(likelihood_loss)
-    sampled_losses.append(loss)
-    sampled_grads.append(grad)
+
+    if i < samples:
+        likelihood_loss = tf.losses.sparse_softmax_cross_entropy(labels_ph, predictions)
+        weight = 1/M
+        loss = weight * complexity_loss + likelihood_loss
+        grad = optimizer.compute_gradients(loss)
+
+        sampled_complexity_losses.append(complexity_loss)
+        sampled_likelihood_losses.append(likelihood_loss)
+        sampled_losses.append(loss)
+        sampled_grads.append(grad)
 
 stacked_predictions = tf.stack(sampled_predictions)
-#avg_prediction = tf.reduce_mean(stacked_predictions, axis=0)
-#std_predictions = tf.math.reduce_std(tf.nn.softmax(stacked_predictions), axis=0)
-#std_sum_predictions = tf.reduce_sum(std_predictions, axis=1)
-#_, most_confusing = tf.math.top_k(std_sum_predictions, k = 10)
-#avg_std_sum_predictions = tf.reduce_mean(std_sum_predictions, axis=0)
+stacked_predictions_train = tf.stack(sampled_predictions[:samples])
 avg_prediction = tf.reduce_mean(tf.nn.softmax(stacked_predictions), axis=0)
+avg_prediction_train = tf.reduce_mean(tf.nn.softmax(stacked_predictions_train), axis=0)
+
+entropy_train = -tf.reduce_sum((avg_prediction_train * tf.log(avg_prediction_train+EPS)), axis=1)
 entropy = -tf.reduce_sum((avg_prediction * tf.log(avg_prediction+EPS)), axis=1)
-avg_entropy = tf.reduce_mean(entropy)
+avg_entropy = tf.reduce_mean(entropy_train)
 _, most_confusing = tf.math.top_k(entropy, k = 10)
-print(entropy)
+_, most_confident = tf.math.top_k(-entropy, k = 10)
 
 avg_complexity_loss = tf.reduce_mean(tf.stack(sampled_complexity_losses))
 avg_likelihood_loss = tf.reduce_mean(tf.stack(sampled_likelihood_losses))
@@ -98,7 +129,7 @@ avg_loss = tf.reduce_mean(tf.stack(sampled_losses))
 avg_grads = average_gradients(sampled_grads)
 
 
-prediction = tf.argmax(predictions, axis=1, output_type=tf.int32)
+prediction = tf.argmax(avg_prediction, axis=1, output_type=tf.int32)
 correct_prediction = tf.equal(prediction, y_test)
 val_acc = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
 
@@ -107,7 +138,6 @@ update = optimizer.apply_gradients(avg_grads, global_step=step)
 
 tf.summary.scalar('avg_complexity_loss', avg_complexity_loss)
 tf.summary.scalar('avg_likelihood_loss', avg_likelihood_loss)
-#tf.summary.scalar('avg_std_sum_predictions', avg_std_sum_predictions)
 tf.summary.scalar('avg_entropy', avg_entropy)
 tf.summary.scalar('avg_loss', avg_loss)
 
@@ -115,158 +145,25 @@ init = tf.global_variables_initializer()
 
 summaries_op = tf.summary.merge_all()
 
-logdir = './summaries/run-' + args.name + '-' + str(int(time.time()))
-summary_writer = tf.summary.FileWriter(logdir, tf.get_default_graph())
-epochs = 100
-
+summary_writer = tf.summary.FileWriter(summaries_dir, tf.get_default_graph())
 
 with tf.Session() as sess:
     sess.run(init)
 
     for epoch in range(epochs):
-        print("EPOCH {}".format(epoch))
+        print("EPOCH {}\n".format(epoch))
         batches = np.random.permutation(range(N))[:N-(N % batch_size)].reshape(M, batch_size)
         for i in tqdm(range(len(batches))):
             batch = batches[i]
             feed_dict = {in_ph : x_train[batch], labels_ph : y_train[batch]}
             summaries, _ = sess.run([summaries_op, update], feed_dict)
             summary_writer.add_summary(summaries, global_step=i+epoch*len(batches))
-        va, top_confusing, avp = sess.run([val_acc, most_confusing, avg_prediction], {in_ph: x_test, labels_ph: y_test})
+        va, top_confusing, top_confident, avp = sess.run([val_acc, most_confusing, most_confident, avg_prediction], {in_ph: x_test, labels_ph: y_test})
         print("Validation accuracy: {}".format(va))
-        print("Most confused: {}".format(top_confusing))
-        print("Most confused vals: {}".format(avp[top_confusing]))
-
-
-
-# @tf.function
-# def train_step(images, labels, weight):
-#     with tf.GradientTape() as t:
-#         predictions, complexity_loss = model(images)
-#         likelihood_loss = cce(labels, predictions)
-#         loss = weight * complexity_loss + likelihood_loss
-#     grads = t.gradient(loss, model.trainable_variables)
-#     optimizer.apply_gradients(zip(grads, model.trainable_variables))
-#     tf.summary.scalar('likelihood_loss', likelihood_loss)
-#     tf.summary.scalar('complexity_loss', complexity_loss)
-#     return likelihood_loss, 1
-#
-# #tf.summary.trace_on(graph=True, profiler=True)
-# #traced = False
-# with summary_writer.as_default():
-#     for epoch in range(epochs):
-#         print("EPOCH {}".format(epoch))
-#         batches = np.random.permutation(range(N))[:N-(N % batch_size)].reshape(M,batch_size)
-#         for i in tqdm(range(len(batches))):
-#             tf.summary.experimental.set_step(step)
-#             batch = batches[i]
-#             #weight = (2**(M - i + 1))/(2**M - 1)
-#             weight = 1 / M
-#             l_loss, c_loss = train_step(x_train[batch], y_train_logits[batch], weight)
-#             #if not traced:
-#             #    tf.summary.trace_export(
-#             #        name="train_step_traced",
-#             #        step=step,
-#             #        profiler_outdir=logdir)
-#             #    traced = True
-#             step.assign_add(1)
-#
-#         logits, complexity_loss = model(x_test)
-#         prediction = tf.argmax(logits, axis=1, output_type=tf.int32)
-#        val_acc = acc(prediction, y_test)
-#        print("Validation accuracy: {}".format(val_acc))
-
-# model = Sequential()
-#
-# if bayesion:
-#     model.add(Flatten())
-#     model.add(Bayesion(800))
-#     model.add(Activation('relu'))
-#     model.add(Bayesion(800))
-#     model.add(Activation('relu'))
-#     model.add(Bayesion(num_classes))
-#     model.add(Activation('softmax'))
-# else:
-#     model.add(Flatten())
-#     model.add(Dense(800))
-#     model.add(Activation('relu'))
-#     model.add(Dropout(0.5))
-#     model.add(Dense(800))
-#     model.add(Activation('relu'))
-#     model.add(Dropout(0.5))
-#     model.add(Dense(num_classes))
-#     model.add(Activation('softmax'))
-#
-# # initiate RMSprop optimizer
-# opt = keras.optimizers.Adam()
-#
-# # Let's train the model using RMSprop
-# model.compile(loss='categorical_crossentropy',
-#               optimizer=opt,
-#               metrics=['accuracy'])
-#
-# x_train = x_train.astype('float32')
-# x_test = x_test.astype('float32')
-# x_train /= 255
-# x_test /= 255
-#
-# if not data_augmentation:
-#     print('Not using data augmentation.')
-#     model.fit(x_train, y_train,
-#               batch_size=batch_size,
-#               epochs=epochs,
-#               validation_data=(x_test, y_test),
-#               shuffle=True)
-# else:
-#     print('Using real-time data augmentation.')
-#     # This will do preprocessing and realtime data augmentation:
-#     datagen = ImageDataGenerator(
-#         featurewise_center=False,  # set input mean to 0 over the dataset
-#         samplewise_center=False,  # set each sample mean to 0
-#         featurewise_std_normalization=False,  # divide inputs by std of the dataset
-#         samplewise_std_normalization=False,  # divide each input by its std
-#         zca_whitening=False,  # apply ZCA whitening
-#         zca_epsilon=1e-06,  # epsilon for ZCA whitening
-#         rotation_range=0,  # randomly rotate images in the range (degrees, 0 to 180)
-#         # randomly shift images horizontally (fraction of total width)
-#         width_shift_range=0.1,
-#         # randomly shift images vertically (fraction of total height)
-#         height_shift_range=0.1,
-#         shear_range=0.,  # set range for random shear
-#         zoom_range=0.,  # set range for random zoom
-#         channel_shift_range=0.,  # set range for random channel shifts
-#         # set mode for filling points outside the input boundaries
-#         fill_mode='nearest',
-#         cval=0.,  # value used for fill_mode = "constant"
-#         horizontal_flip=True,  # randomly flip images
-#         vertical_flip=False,  # randomly flip images
-#         # set rescaling factor (applied before any other transformation)
-#         rescale=None,
-#         # set function that will be applied on each input
-#         preprocessing_function=None,
-#         # image data format, either "channels_first" or "channels_last"
-#         data_format=None,
-#         # fraction of images reserved for validation (strictly between 0 and 1)
-#         validation_split=0.0)
-#
-#     # Compute quantities required for feature-wise normalization
-#     # (std, mean, and principal components if ZCA whitening is applied).
-#     datagen.fit(x_train)
-#
-#     # Fit the model on the batches generated by datagen.flow().
-#     model.fit_generator(datagen.flow(x_train, y_train,
-#                                      batch_size=batch_size),
-#                         epochs=epochs,
-#                         validation_data=(x_test, y_test),
-#                         workers=4)
-#
-# # Save model and weights
-# if not os.path.isdir(save_dir):
-#    os.makedirs(save_dir)
-#model_path = os.path.join(save_dir, model_name)
-#model.save(model_path)
-#print('Saved trained model at %s ' % model_path)
-#
-## Score trained model.
-#scores = model.evaluate(x_test, y_test, verbose=1)
-#print('Test loss:', scores[0])
-# print('Test accuracy:', scores[1])
+        with open(log_dir, 'a') as log_file:
+            log_file.write("EPOCH {}\n".format(epoch))
+            log_file.write("Validation accuracy: {}\n".format(va))
+        # print("Most confused: {}".format(top_confusing))
+        # print("Most confused vals: {}".format(avp[top_confusing]))
+        # print("Most confident: {}".format(top_confident))
+        # print("Most confident vals: {}".format(avp[top_confident]))
