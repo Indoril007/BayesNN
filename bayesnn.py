@@ -68,22 +68,24 @@ model = BayesNN(input_dim,
 
 
 # The data, split between train and test sets:
-(x_train, y_train), (x_test, y_test) = mnist.load_data()
+(X_TRAIN, Y_TRAIN), (x_test, y_test) = mnist.load_data()
 #x_mean = np.mean(x_train, axis = 0)
 #x_std = np.std(x_train, axis = 0)
 #x_train = (x_train.astype(np.float32) - x_mean) / (x_std + EPS)
 #x_test = (x_test.astype(np.float32) - x_mean) / (x_std + EPS)
-random_indices = np.random.permutation(len(x_train))[:500]
-x_train = x_train[random_indices].astype(np.float32)
-y_train = y_train[random_indices]
+random_indices = np.random.permutation(len(X_TRAIN))[:100]
+x_train = X_TRAIN[random_indices].astype(np.float32)
+y_train = Y_TRAIN[random_indices]
+np.delete(X_TRAIN, random_indices, 0)
+np.delete(Y_TRAIN, random_indices, 0)
 x_test = x_test.astype(np.float32)
 
 N = len(x_train)
 M = N // batch_size
 
 # Convert class vectors to binary class matrices.
-y_train_logits = keras.utils.to_categorical(y_train, num_classes)
-y_test_logits = keras.utils.to_categorical(y_test, num_classes)
+# y_train_logits = keras.utils.to_categorical(y_train, num_classes)
+# y_test_logits = keras.utils.to_categorical(y_test, num_classes)
 
 cce = CategoricalCrossentropy()
 optimizer = AdamOptimizer(learning_rate=learning_rate)
@@ -165,6 +167,17 @@ with tf.Session() as sess:
         with open(log_dir, 'a') as log_file:
             log_file.write("EPOCH {}\n".format(epoch))
             log_file.write("Validation accuracy: {}\n".format(va))
+
+        if epoch < 40:
+            r = np.random.permutation(len(X_TRAIN))[:5000]
+            train_top_confusing = sess.run(most_confusing, {in_ph: X_TRAIN[r], labels_ph: Y_TRAIN[r]})
+            x_train = np.concatenate([x_train, X_TRAIN[r[train_top_confusing]]])
+            y_train = np.concatenate([y_train, Y_TRAIN[r[train_top_confusing]]])
+            np.delete(X_TRAIN, r[train_top_confusing], 0)
+            np.delete(Y_TRAIN, r[train_top_confusing], 0)
+            N = len(x_train)
+            M = N // batch_size
+
         # print("Most confused: {}".format(top_confusing))
         # print("Most confused vals: {}".format(avp[top_confusing]))
         # print("Most confident: {}".format(top_confident))
