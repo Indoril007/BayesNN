@@ -25,9 +25,9 @@ control_flow_util.ENABLE_CONTROL_FLOW_V2 = True
 import argparse
 parser = argparse.ArgumentParser()
 parser.add_argument("-n", "--name")
-parser.add_argument("-s", "--samples", type=int, default=1)
+parser.add_argument("-s", "--samples", type=int, default=3)
 parser.add_argument("-l", "--learningrate", type=float, default=0.001)
-parser.add_argument("-a", "--activation", type=str, default="relu")
+parser.add_argument("-a", "--activation", type=str, default="elu")
 parser.add_argument("-c", "--batches", type=int, default=128)
 parser.add_argument("-p", "--prior", nargs='+', default=[0, -6, 0.25])
 parser.add_argument("-k", "--kernel", nargs='+', default=[-1, 1, -5, -4])
@@ -48,7 +48,7 @@ log_dir = './logs/run-' + args.name + '-' + str(int(time.time())) + '.txt'
 with open(log_dir, 'w') as log_file:
     log_file.write(str(args) + '\n')
 num_classes = 10
-epochs = 1000
+epochs = 50
 
 model = BayesNN(input_dim,
                 output_dim,
@@ -73,7 +73,9 @@ model = BayesNN(input_dim,
 #x_std = np.std(x_train, axis = 0)
 #x_train = (x_train.astype(np.float32) - x_mean) / (x_std + EPS)
 #x_test = (x_test.astype(np.float32) - x_mean) / (x_std + EPS)
-x_train = x_train.astype(np.float32)
+random_indices = np.random.permutation(len(x_train))[:500]
+x_train = x_train[random_indices].astype(np.float32)
+y_train = y_train[random_indices]
 x_test = x_test.astype(np.float32)
 
 N = len(x_train)
