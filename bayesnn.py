@@ -6,15 +6,9 @@ import tensorflow as tf
 import tensorflow.keras as keras
 from tensorflow.keras.datasets import mnist
 from tensorflow.keras import initializers
-from tensorflow.keras.optimizers import Adam
 from tensorflow.train import AdamOptimizer
 from tensorflow.keras.losses import CategoricalCrossentropy
-from tensorflow.keras.preprocessing.image import ImageDataGenerator
-from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import Dense, Dropout, Activation, Flatten
-from tensorflow.keras.layers import Conv2D, MaxPooling2D
 from core import BayesNN, average_gradients
-import os
 import sys
 
 np.set_printoptions(threshold=sys.maxsize)
@@ -114,27 +108,27 @@ for i in range(50):
 
 stacked_predictions = tf.stack(sampled_predictions)
 stacked_predictions_train = tf.stack(sampled_predictions[:samples])
-avg_prediction = tf.reduce_mean(tf.nn.softmax(stacked_predictions), axis=0)
+avg_prediction_op = tf.reduce_mean(tf.nn.softmax(stacked_predictions), axis=0)
 avg_prediction_train = tf.reduce_mean(tf.nn.softmax(stacked_predictions_train), axis=0)
 
 entropy_train = -tf.reduce_sum((avg_prediction_train * tf.log(avg_prediction_train+EPS)), axis=1)
-entropy = -tf.reduce_sum((avg_prediction * tf.log(avg_prediction+EPS)), axis=1)
+entropy_op = -tf.reduce_sum((avg_prediction_op * tf.log(avg_prediction_op+EPS)), axis=1)
 avg_entropy = tf.reduce_mean(entropy_train)
-_, most_confusing = tf.math.top_k(entropy, k = 10)
-_, most_confident = tf.math.top_k(-entropy, k = 10)
+_, most_confusing = tf.math.top_k(entropy_op, k = 10)
+_, most_confident = tf.math.top_k(-entropy_op, k = 10)
 
 avg_complexity_loss = tf.reduce_mean(tf.stack(sampled_complexity_losses))
 avg_likelihood_loss = tf.reduce_mean(tf.stack(sampled_likelihood_losses))
 avg_loss = tf.reduce_mean(tf.stack(sampled_losses))
 avg_grads = average_gradients(sampled_grads)
 
+prediction = tf.argmax(avg_prediction_op, axis=1, output_type=tf.int32)
+correct_prediction_op = tf.equal(prediction, y_test)
+avg_entropy_correct_op = tf.reduce_mean(tf.boolean_mask(entropy_op, correct_prediction_op))
+avg_entropy_incorrect_op = tf.reduce_mean(tf.boolean_mask(entropy_op, tf.logical_not(correct_prediction_op)))
+val_acc_op = tf.reduce_mean(tf.cast(correct_prediction_op, tf.float32))
 
-prediction = tf.argmax(avg_prediction, axis=1, output_type=tf.int32)
-correct_prediction = tf.equal(prediction, y_test)
-val_acc = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
-
-step = tf.train.get_or_create_global_step()
-update = optimizer.apply_gradients(avg_grads, global_step=step)
+update_op = optimizer.apply_gradients(avg_grads)
 
 tf.summary.scalar('avg_complexity_loss', avg_complexity_loss)
 tf.summary.scalar('avg_likelihood_loss', avg_likelihood_loss)
@@ -147,6 +141,8 @@ summaries_op = tf.summary.merge_all()
 
 summary_writer = tf.summary.FileWriter(summaries_dir, tf.get_default_graph())
 
+step = 0
+
 with tf.Session() as sess:
     sess.run(init)
 
@@ -156,13 +152,30 @@ with tf.Session() as sess:
         for i in tqdm(range(len(batches))):
             batch = batches[i]
             feed_dict = {in_ph : x_train[batch], labels_ph : y_train[batch]}
-            summaries, _ = sess.run([summaries_op, update], feed_dict)
-            summary_writer.add_summary(summaries, global_step=i+epoch*len(batches))
-        va, top_confusing, top_confident, avp = sess.run([val_acc, most_confusing, most_confident, avg_prediction], {in_ph: x_test, labels_ph: y_test})
+            summaries, _ = sess.run([summaries_op, update_op], feed_dict)
+            summary_writer.add_summary(summaries, global_step=step)
+            step += 1
+        outputs = sess.run([val_acc_op,
+                            avg_entropy_correct_op,
+                            avg_entropy_incorrect_op,
+                            correct_prediction_op,
+                            entropy_op,
+                            avg_prediction_op],
+                           feed_dict={in_ph: x_test, labels_ph: y_test})
+
+        fp = ~cp
+        bad_predictions = ap[fp]
+        bad_entropys = ent[fp]
         print("Validation accuracy: {}".format(va))
+        print("correct entropy: {}".format(aec))
+        print("incorrect entropy: {}".format(aei))
+        # print("PREDICTIONS FOR INCCORECT {}".format(bad_predictions[:30]))
+        # print("ENTROPYS FOR INCCORECT {}".format(bad_entropys[:30]))
         with open(log_dir, 'a') as log_file:
             log_file.write("EPOCH {}\n".format(epoch))
             log_file.write("Validation accuracy: {}\n".format(va))
+            log_file.write("correct entropy: {}".format(aec))
+            log_file.write("incorrect entropy: {}".format(aei))
         # print("Most confused: {}".format(top_confusing))
         # print("Most confused vals: {}".format(avp[top_confusing]))
         # print("Most confident: {}".format(top_confident))
