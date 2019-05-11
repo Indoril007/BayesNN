@@ -3,7 +3,7 @@ import time
 import numpy as np
 import tensorflow.keras as keras
 from tensorflow.keras import backend as K
-from tensorflow.keras.layers import Layer, Flatten, Activation
+from tensorflow.keras.layers import Layer, Flatten, Activation, Dropout, Dense
 from tensorflow.keras import constraints
 from tensorflow.keras import initializers
 from tensorflow.keras import regularizers
@@ -180,7 +180,7 @@ class Bayesion(Layer):
                  kernel_rho_regularizer=None,
                  kernel_mean_constraint=None,
                  kernel_rho_constraint=None,
-                 bias_mean_initializer=initializers.RandomUniform(minval=1, maxval=2),
+                 bias_mean_initializer=initializers.RandomUniform(minval=-1, maxval=1),
                  bias_rho_initializer=initializers.RandomUniform(minval=-5, maxval=-4),
                  bias_mean_regularizer=None,
                  bias_rho_regularizer=None,
@@ -288,17 +288,61 @@ class Bayesion(Layer):
             'units': self.units,
             'activation': activations.serialize(self.activation),
             'use_bias': self.use_bias,
-            'kernel_initializer': initializers.serialize(self.kernel_initializer),
-            'bias_initializer': initializers.serialize(self.bias_initializer),
-            'kernel_regularizer': regularizers.serialize(self.kernel_regularizer),
-            'bias_regularizer': regularizers.serialize(self.bias_regularizer),
-            'activity_regularizer':
-                regularizers.serialize(self.activity_regularizer),
-            'kernel_constraint': constraints.serialize(self.kernel_constraint),
-            'bias_constraint': constraints.serialize(self.bias_constraint)
+            #'kernel_initializer': initializers.serialize(self.kernel_initializer),
+            #'bias_initializer': initializers.serialize(self.bias_initializer),
+            #'kernel_regularizer': regularizers.serialize(self.kernel_regularizer),
+            #'bias_regularizer': regularizers.serialize(self.bias_regularizer),
+            #'activity_regularizer':
+            #    regularizers.serialize(self.activity_regularizer),
+            #'kernel_constraint': constraints.serialize(self.kernel_constraint),
+            #'bias_constraint': constraints.serialize(self.bias_constraint)
         }
-        base_config = super(Dense, self).get_config()
+        base_config = super(Bayesion, self).get_config()
         return dict(list(base_config.items()) + list(config.items()))
+
+class DropoutBayesNN(tf.keras.Model):
+
+    def __init__(self,
+                 input_dim,
+                 output_dim,
+                 batch_size=128,
+                 activation = 'relu',
+                 dropout=0.5):
+
+        super(DropoutBayesNN, self).__init__()
+        self.flatten = Flatten(input_shape=input_dim)
+
+        self.layer_1 = Dense(800)
+        self.activation_1 = Activation(activation)
+        self.dropout_1 = Dropout(dropout)
+
+        self.layer_2 = Dense(800)
+        self.activation_2 = Activation(activation)
+        self.dropout_2 = Dropout(dropout)
+
+        self.layer_3 = Dense(800)
+        self.activation_3 = Activation(activation)
+        self.dropout_3 = Dropout(dropout)
+
+        self.final_layer = Dense(output_dim)
+
+        self.batch_size = batch_size
+        self.output_dim = output_dim
+
+    def call(self, inputs):
+        x = self.flatten(inputs)
+        x = self.layer_1(x)
+        x = self.activation_1(x)
+        x = self.dropout_1(x, training=True)
+        x = self.layer_2(x)
+        x = self.activation_2(x)
+        x = self.dropout_2(x, training=True)
+        x = self.layer_3(x)
+        x = self.activation_3(x)
+        x = self.dropout_3(x, training=True)
+        x = self.final_layer(x)
+        return x, 0
+
 
 
 class BayesNN(tf.keras.Model):
@@ -318,7 +362,7 @@ class BayesNN(tf.keras.Model):
 
         super(BayesNN, self).__init__()
         self.flatten = Flatten(input_shape=input_dim)
-        self.layer_1 = Bayesion(1200,
+        self.layer_1 = Bayesion(400,
                                 prior_mixture_std_1=prior_mixture_std_1,
                                 prior_mixture_std_2=prior_mixture_std_2,
                                 prior_mixture_weight=prior_mixture_weight,
@@ -328,7 +372,7 @@ class BayesNN(tf.keras.Model):
                                 bias_rho_initializer=bias_rho_initializer)
 
         self.activation_1 = Activation(activation)
-        self.layer_2 = Bayesion(1200,
+        self.layer_2 = Bayesion(400,
                                 prior_mixture_std_1=prior_mixture_std_1,
                                 prior_mixture_std_2=prior_mixture_std_2,
                                 prior_mixture_weight=prior_mixture_weight,
@@ -338,6 +382,16 @@ class BayesNN(tf.keras.Model):
                                 bias_rho_initializer=bias_rho_initializer)
 
         self.activation_2 = Activation(activation)
+        self.layer_3 = Bayesion(400,
+                                prior_mixture_std_1=prior_mixture_std_1,
+                                prior_mixture_std_2=prior_mixture_std_2,
+                                prior_mixture_weight=prior_mixture_weight,
+                                kernel_mean_initializer=kernel_mean_initializer,
+                                kernel_rho_initializer=kernel_rho_initializer,
+                                bias_mean_initializer=bias_mean_initializer,
+                                bias_rho_initializer=bias_rho_initializer)
+
+        self.activation_3 = Activation(activation)
         self.final_layer = Bayesion(output_dim,
                                 prior_mixture_std_1=prior_mixture_std_1,
                                 prior_mixture_std_2=prior_mixture_std_2,
@@ -358,8 +412,12 @@ class BayesNN(tf.keras.Model):
         x = self.activation_1(x)
         x = self.layer_2(x)
         x = self.activation_2(x)
+        x = self.layer_3(x)
+        x = self.activation_3(x)
         x = self.final_layer(x)
         return x, K.sum(self.losses)
+
+
 
 if __name__ == "__main__":
     from tensorflow.keras.datasets import mnist
