@@ -154,8 +154,8 @@ test_avg_epistemic_op = tf.reduce_mean(test_epistemic_op)
 
 test_avg_aleatoric_op = tf.reduce_mean(test_aleatoric_op)
 
-#pre_entropy = tf.reduce_sum((1-labels_one_hot) * train_avg_prediction_op, axis=1) * train_entropy_op
-#entropy_loss = -tf.reduce_mean(pre_entropy)
+pre_entropy = tf.reduce_sum((1-labels_one_hot) * train_avg_prediction_op, axis=1) * train_entropy_op
+entropy_loss = -tf.reduce_mean(pre_entropy)
 
 _, most_confusing = tf.math.top_k(test_entropy_op, k = 10)
 _, most_confident = tf.math.top_k(-test_entropy_op, k = 10)
@@ -229,7 +229,7 @@ with tf.Session() as sess:
             #pi = (2**(M-(i+1))) / ((2**M) - 1)
             pi = 1/M
             batch = batches[i]
-            feed_dict = {in_ph : x_train[batch], labels_ph : y_train[batch], pi_ph: pi, alpha_ph : alpha}
+            feed_dict = {in_ph: x_train[batch], labels_ph : y_train[batch], pi_ph: pi, alpha_ph : alpha}
             batch_summaries, _ = sess.run([batch_summaries_op, update_op], feed_dict)
             batch_summary_writer.add_summary(batch_summaries, global_step=step)
             step += 1
