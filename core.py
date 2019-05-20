@@ -88,15 +88,17 @@ class Gaussian(object):
 
 
 class ScaleMixtureGaussian(object):
-    def __init__(self, pi, sigma1, sigma2):
+    def __init__(self, pi, sigma1, sigma2, mu1=0, mu2=0):
         super().__init__()
         self.pi = pi
+        self.mu1 = mu1
+        self.mu2 = mu2
         self.sigma1 = sigma1
         self.sigma2 = sigma2
         self.rho1 = K.log(K.exp(self.sigma1) - 1)
         self.rho2 = K.log(K.exp(self.sigma2) - 1)
-        self.gaussian1 = Gaussian(0., self.rho1)
-        self.gaussian2 = Gaussian(0., self.rho2)
+        self.gaussian1 = Gaussian(self.mu1, self.rho1)
+        self.gaussian2 = Gaussian(self.mu2, self.rho2)
 
     def log_prob(self, x):
         prob1 = K.exp(self.gaussian1.log_likelihood(x))
@@ -173,6 +175,8 @@ class Bayesion(Layer):
                  use_bias=True,
                  prior_mixture_std_1 = np.exp(0).astype(np.float32),
                  prior_mixture_std_2 = np.exp(-6).astype(np.float32),
+                 prior_mixture_mu_1=0.0,
+                 prior_mixture_mu_2=0.0,
                  prior_mixture_weight = 0.25,
                  kernel_mean_initializer=initializers.RandomUniform(minval=-1, maxval=1),
                  kernel_rho_initializer=initializers.RandomUniform(minval=-5, maxval=-4),
@@ -196,7 +200,8 @@ class Bayesion(Layer):
         self.activation = activations.get(activation)
         self.use_bias = use_bias
 
-        self.prior_distribution = ScaleMixtureGaussian(prior_mixture_weight, prior_mixture_std_1, prior_mixture_std_2)
+        self.prior_distribution = ScaleMixtureGaussian(prior_mixture_weight, prior_mixture_std_1, prior_mixture_std_2,
+                                                       prior_mixture_mu_1, prior_mixture_mu_2)
 
         self.kernel_mean_initializer = kernel_mean_initializer
         self.kernel_rho_initializer = kernel_rho_initializer
@@ -354,7 +359,9 @@ class BayesNN(tf.keras.Model):
                  activation = 'relu',
                  prior_mixture_std_1 = np.exp(0).astype(np.float32),
                  prior_mixture_std_2 = np.exp(-6).astype(np.float32),
-                 prior_mixture_weight = 0.25,
+                 prior_mixture_mu_1 = 0.0,
+                 prior_mixture_mu_2 = 0.0,
+                 prior_mixture_weight = 0.50,
                  kernel_mean_initializer=initializers.RandomUniform(minval=-1, maxval=1),
                  kernel_rho_initializer=initializers.RandomUniform(minval=-5, maxval=-4),
                  bias_mean_initializer=initializers.RandomUniform(minval=1, maxval=2),
@@ -362,9 +369,11 @@ class BayesNN(tf.keras.Model):
 
         super(BayesNN, self).__init__()
         self.flatten = Flatten(input_shape=input_dim)
-        self.layer_1 = Bayesion(400,
+        self.layer_1 = Bayesion(1200,
                                 prior_mixture_std_1=prior_mixture_std_1,
                                 prior_mixture_std_2=prior_mixture_std_2,
+                                prior_mixture_mu_1=prior_mixture_mu_1,
+                                prior_mixture_mu_2=prior_mixture_mu_2,
                                 prior_mixture_weight=prior_mixture_weight,
                                 kernel_mean_initializer=kernel_mean_initializer,
                                 kernel_rho_initializer=kernel_rho_initializer,
@@ -372,9 +381,11 @@ class BayesNN(tf.keras.Model):
                                 bias_rho_initializer=bias_rho_initializer)
 
         self.activation_1 = Activation(activation)
-        self.layer_2 = Bayesion(400,
+        self.layer_2 = Bayesion(1200,
                                 prior_mixture_std_1=prior_mixture_std_1,
                                 prior_mixture_std_2=prior_mixture_std_2,
+                                prior_mixture_mu_1=prior_mixture_mu_1,
+                                prior_mixture_mu_2=prior_mixture_mu_2,
                                 prior_mixture_weight=prior_mixture_weight,
                                 kernel_mean_initializer=kernel_mean_initializer,
                                 kernel_rho_initializer=kernel_rho_initializer,
@@ -382,9 +393,11 @@ class BayesNN(tf.keras.Model):
                                 bias_rho_initializer=bias_rho_initializer)
 
         self.activation_2 = Activation(activation)
-        self.layer_3 = Bayesion(400,
+        self.layer_3 = Bayesion(1200,
                                 prior_mixture_std_1=prior_mixture_std_1,
                                 prior_mixture_std_2=prior_mixture_std_2,
+                                prior_mixture_mu_1=prior_mixture_mu_1,
+                                prior_mixture_mu_2=prior_mixture_mu_2,
                                 prior_mixture_weight=prior_mixture_weight,
                                 kernel_mean_initializer=kernel_mean_initializer,
                                 kernel_rho_initializer=kernel_rho_initializer,
@@ -395,6 +408,8 @@ class BayesNN(tf.keras.Model):
         self.final_layer = Bayesion(output_dim,
                                 prior_mixture_std_1=prior_mixture_std_1,
                                 prior_mixture_std_2=prior_mixture_std_2,
+                                prior_mixture_mu_1=prior_mixture_mu_1,
+                                prior_mixture_mu_2=prior_mixture_mu_2,
                                 prior_mixture_weight=prior_mixture_weight,
                                 kernel_mean_initializer=kernel_mean_initializer,
                                 kernel_rho_initializer=kernel_rho_initializer,
@@ -412,8 +427,8 @@ class BayesNN(tf.keras.Model):
         x = self.activation_1(x)
         x = self.layer_2(x)
         x = self.activation_2(x)
-        x = self.layer_3(x)
-        x = self.activation_3(x)
+        #x = self.layer_3(x)
+        #x = self.activation_3(x)
         x = self.final_layer(x)
         return x, K.sum(self.losses)
 

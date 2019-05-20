@@ -26,7 +26,7 @@ parser.add_argument("-A", "--alpha", type=float, default=0.5)
 parser.add_argument("-B", "--beta", type=float, default=0)
 parser.add_argument("-a", "--activation", type=str, default="elu")
 parser.add_argument("-c", "--batches", type=int, default=128)
-parser.add_argument("-p", "--prior", nargs='+', default=[0, -6, 0.25])
+parser.add_argument("-p", "--prior", nargs='+', default=[0, -6, 0, 0, 0.25])
 parser.add_argument("-k", "--kernel", nargs='+', default=[-1, 1, -5, -4])
 parser.add_argument("-b", "--bias", nargs='+', default=[-1, 1, -5, -4])
 args = parser.parse_args()
@@ -46,41 +46,50 @@ log_dir = './logs/' + args.name + '-' + str(int(time.time())) + '.txt'
 with open(log_dir, 'w') as log_file:
     log_file.write(str(args) + '\n')
 num_classes = 10
-epochs = 1000
+epochs = 50000
 alpha = args.alpha
 beta = args.beta
 save_frequency = args.savefrequency
 
-model = DropoutBayesNN(input_dim,
-                       output_dim,
-                       batch_size=batch_size,
-                       activation=args.activation)
+# model = DropoutBayesNN(input_dim,
+#                        output_dim,
+#                        batch_size=batch_size,
+#                        activation=args.activation)
 
-# model = BayesNN(input_dim,
-#                 output_dim,
-#                 batch_size=batch_size,
-#                 activation = args.activation,
-#                 prior_mixture_std_1 = np.exp(float(args.prior[0])).astype(np.float32),
-#                 prior_mixture_std_2 = np.exp(float(args.prior[1])).astype(np.float32),
-#                 prior_mixture_weight = float(args.prior[2]),
-#                 kernel_mean_initializer=initializers.RandomUniform(minval=float(args.kernel[0]),
-#                                                                    maxval=float(args.kernel[1])),
-#                 kernel_rho_initializer=initializers.RandomUniform(minval=float(args.kernel[2]),
-#                                                                   maxval=float(args.kernel[3])),
-#                 bias_mean_initializer=initializers.RandomUniform(minval=float(args.bias[0]),
-#                                                                  maxval=float(args.bias[1])),
-#                 bias_rho_initializer=initializers.RandomUniform(minval=float(args.bias[2]),
-#                                                                 maxval=float(args.bias[3])))
+model = BayesNN(input_dim,
+                output_dim,
+                batch_size=batch_size,
+                activation = args.activation,
+                prior_mixture_std_1 = np.exp(float(args.prior[0])).astype(np.float32),
+                prior_mixture_std_2 = np.exp(float(args.prior[1])).astype(np.float32),
+                prior_mixture_mu_1=float(args.prior[2]),
+                prior_mixture_mu_2=float(args.prior[3]),
+                prior_mixture_weight=float(args.prior[4]),
+                kernel_mean_initializer=initializers.RandomUniform(minval=float(args.kernel[0]),
+                                                                   maxval=float(args.kernel[1])),
+                kernel_rho_initializer=initializers.RandomUniform(minval=float(args.kernel[2]),
+                                                                  maxval=float(args.kernel[3])),
+                bias_mean_initializer=initializers.RandomUniform(minval=float(args.bias[0]),
+                                                                 maxval=float(args.bias[1])),
+                bias_rho_initializer=initializers.RandomUniform(minval=float(args.bias[2]),
+                                                                maxval=float(args.bias[3])))
 
 # model.load_weights('/home/mil/james/workspace/synched/BayesNN/saves/testing_aleatoric_values_11_with_saves-1557570933/epoch-6')
 
 # The data, split between train and test sets:
-(x_train, y_train), (x_test, y_test) = mnist.load_data()
+#(x_train, y_train), (x_test, y_test) = mnist.load_data()
+(X_TRAIN, Y_TRAIN), (x_test, y_test) = mnist.load_data()
 # x_mean = np.mean(x_train, axis = 0)
 # x_std = np.std(x_train, axis = 0)
 # x_train = (x_train.astype(np.float32) - x_mean) / (x_std + EPS)
 # x_test = (x_test.astype(np.float32) - x_mean) / (x_std + EPS)
-x_train = x_train.astype(np.float32)
+#x_train = x_train.astype(np.float32)
+random_indices = np.random.permutation(len(X_TRAIN))[:100]
+x_train = X_TRAIN[random_indices].astype(np.float32)
+y_train = Y_TRAIN[random_indices]
+np.delete(X_TRAIN, random_indices, 0)
+np.delete(Y_TRAIN, random_indices, 0)
+
 x_test = x_test.astype(np.float32)
 
 N = len(x_train)
@@ -250,6 +259,16 @@ with tf.Session() as sess:
 
         print("validation accuracy: {}".format(test_acc))
         print("training accuracy: {}".format(train_acc))
+
+        if epoch > 300 and epoch % 100 == 0:
+            r = np.random.permutation(len(X_TRAIN))[:5000]
+            train_top_confusing = sess.run(most_confusing, {in_ph: X_TRAIN[r], labels_ph: Y_TRAIN[r]})
+            x_train = np.concatenate([x_train, X_TRAIN[r[train_top_confusing]]])
+            y_train = np.concatenate([y_train, Y_TRAIN[r[train_top_confusing]]])
+            np.delete(X_TRAIN, r[train_top_confusing], 0)
+            np.delete(Y_TRAIN, r[train_top_confusing], 0)
+            N = len(x_train)
+            M = N // batch_size
 
         # if (epoch > 0) and (epoch % save_frequency == 0):
         #     model.save_weights(save_dir + 'epoch-{}'.format(epoch))
