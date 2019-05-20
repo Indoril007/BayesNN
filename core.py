@@ -27,14 +27,23 @@ class Gaussian(object):
     def sigma(self):
         return K.log(1 + K.exp(self.rho))
 
+    # def sample(self):
+    #     epsilon = K.random_normal(self.mu.shape)
+    #     return self.mu + self.sigma * epsilon
+
     def sample(self):
         epsilon = K.random_normal(self.mu.shape)
-        return self.mu + self.sigma * epsilon
+        return K.stop_gradient(self.mu) + K.stop_gradient(self.sigma) * epsilon, epsilon
+
+    # def log_likelihood(self, x):
+    #     return -0.5 * (K.pow(((x - K.stop_gradient(self.mu)) / K.stop_gradient(self.sigma)), 2)
+    #                          + K.log(2*np.pi)
+    #                          + 2*K.log(K.stop_gradient(self.sigma)))
 
     def log_likelihood(self, x):
-        return -0.5 * (K.pow(((x - K.stop_gradient(self.mu)) / K.stop_gradient(self.sigma)), 2)
+        return -0.5 * (K.pow(((x - self.mu) / self.sigma), 2)
                              + K.log(2*np.pi)
-                             + 2*K.log(K.stop_gradient(self.sigma)))
+                             + 2*K.log(self.sigma))
 
 
 class ScaleMixtureGaussian(object):
@@ -119,6 +128,7 @@ class Bayesion(Layer):
     """
 
     def __init__(self, units,
+
                  activation=None,
                  use_bias=True,
                  prior_mixture_std_1 = np.exp(0).astype(np.float32),
@@ -130,7 +140,7 @@ class Bayesion(Layer):
                  kernel_rho_regularizer=None,
                  kernel_mean_constraint=None,
                  kernel_rho_constraint=None,
-                 bias_mean_initializer=initializers.RandomUniform(minval=1, maxval=3),
+                 bias_mean_initializer=initializers.RandomUniform(minval=-0.1, maxval=0.1),
                  bias_rho_initializer=initializers.RandomUniform(minval=-5, maxval=-4),
                  bias_mean_regularizer=None,
                  bias_rho_regularizer=None,
@@ -163,6 +173,10 @@ class Bayesion(Layer):
 
         self.input_spec = InputSpec(min_ndim=2)
         self.supports_masking = True
+
+        self.sampled_weights = []
+        self.kernel_epsilon = None
+        self.bias_epsilon = None
 
     def build(self, input_shape):
         assert len(input_shape) >= 2
@@ -247,16 +261,20 @@ class Bayesion(Layer):
         input_dim, units  = self.kernel_mean.shape
 
         # epsilon should be resampled for each input
-        self.kernel = self.kernel_distribution.sample()
+        self.kernel, self.kernel_epsilon = self.kernel_distribution.sample()
         self.variational_posterior = K.sum(self.kernel_distribution.log_likelihood(self.kernel))
         self.log_prior = K.sum(self.prior_distribution.log_prob(self.kernel))
+
+        self.sampled_weights.append(self.kernel)
 
         output = K.dot(inputs, self.kernel)
 
         if self.use_bias:
-            self.bias = self.bias_distribution.sample()
+            self.bias, self.bias_epsilon = self.bias_distribution.sample()
             self.variational_posterior += K.sum(self.bias_distribution.log_likelihood(self.bias))
             self.log_prior += K.sum(self.prior_distribution.log_prob(self.bias))
+
+            self.sampled_weights.append(self.bias)
 
             output = K.bias_add(output, self.bias)
         if self.activation is not None:
@@ -305,19 +323,33 @@ class BayesNN(tf.keras.Model):
         self.layer_2 = Bayesion(400)
         self.activation_2 = Activation('relu')
         self.final_layer = Bayesion(output_dim)
-        self.final_layer_activation = Activation('softmax')
+        #self.final_layer_activation = Activation('softmax')
         self.batch_size = batch_size
         self.output_dim = output_dim
+        self.sampled_weights = []
+        self.epsilons = []
 
 
     #@tf.function
     def call(self, inputs):
         x = self.flatten(inputs)
         x = self.layer_1(x, self.batch_size)
+        self.sampled_weights += self.layer_1.sampled_weights
+        self.epsilons.append(self.layer_1.kernel_epsilon)
+        self.epsilons.append(self.layer_1.bias_epsilon)
+
         x = self.activation_1(x)
         x = self.layer_2(x, self.batch_size)
+        self.sampled_weights += self.layer_2.sampled_weights
+        self.epsilons.append(self.layer_2.kernel_epsilon)
+        self.epsilons.append(self.layer_2.bias_epsilon)
+
         x = self.activation_2(x)
         x = self.final_layer(x, self.batch_size)
+        self.sampled_weights += self.final_layer.sampled_weights
+        self.epsilons.append(self.final_layer.kernel_epsilon)
+        self.epsilons.append(self.final_layer.bias_epsilon)
+
         #return self.final_layer_activation(x), K.sum(self.losses)
         return x, K.sum(self.losses)
 

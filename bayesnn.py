@@ -63,7 +63,15 @@ val_acc = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
 weight = 1/M
 loss = weight * complexity_loss + likelihood_loss
 step = tf.train.get_or_create_global_step()
-grads = optimizer.compute_gradients(loss)
+#grads = optimizer.compute_gradients(loss)
+
+partial_sampled_weight_grads = tf.gradients(loss, model.sampled_weights)
+partial_mean_grads = tf.gradients(loss,)
+
+
+
+
+
 update = optimizer.minimize(loss, global_step=step)
 
 tf.summary.scalar('complexity_loss', complexity_loss)
