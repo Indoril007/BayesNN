@@ -12,34 +12,9 @@ from tensorflow.keras.losses import CategoricalCrossentropy
 from tensorflow.python.keras.engine.input_spec import InputSpec
 
 ### This is a temporary patch and may possibly be removed in future versions of TF2
-from tensorflow.python.ops import control_flow_util
-control_flow_util.ENABLE_CONTROL_FLOW_V2 = True
+#from tensorflow.python.ops import control_flow_util
+#control_flow_util.ENABLE_CONTROL_FLOW_V2 = True
 
-
-def average_gradients(tower_grads):
-    average_grads = []
-    for grad_and_vars in zip(*tower_grads):
-        # Note that each grad_and_vars looks like the following:
-        #   ((grad0_gpu0, var0_gpu0), ... , (grad0_gpuN, var0_gpuN))
-        grads = []
-        for g, _ in grad_and_vars:
-            # Add 0 dimension to the gradients to represent the tower.
-            expanded_g = tf.expand_dims(g, 0)
-
-            # Append on a 'tower' dimension which we will average over below.
-            grads.append(expanded_g)
-
-        # Average over the 'tower' dimension.
-        grad = tf.concat(axis=0, values=grads)
-        grad = tf.reduce_mean(grad, 0)
-
-        # Keep in mind that the Variables are redundant because they are shared
-        # across towers. So .. we will just return the first tower's pointer to
-        # the Variable.
-        v = grad_and_vars[0][1]
-        grad_and_var = (grad, v)
-        average_grads.append(grad_and_var)
-    return average_grads
 
 def average_gradients(tower_grads):
     average_grads = []
@@ -79,12 +54,12 @@ class Gaussian(object):
 
     def sample(self):
         epsilon = K.random_normal(self.mu.shape)
-        return self.mu + self.sigma * epsilon
+        return K.stop_gradient(self.mu) + K.stop_gradient(self.sigma) * epsilon, epsilon
 
     def log_likelihood(self, x):
-        return -0.5 * (K.pow(((x - K.stop_gradient(self.mu)) / K.stop_gradient(self.sigma)), 2)
+        return -0.5 * (K.pow(((x - self.mu) / self.sigma), 2)
                              + K.log(2*np.pi)
-                             + 2*K.log(K.stop_gradient(self.sigma)))
+                             + 2*K.log(self.sigma))
 
 
 class ScaleMixtureGaussian(object):
@@ -216,6 +191,10 @@ class Bayesion(Layer):
         self.bias_mean_constraint   = bias_mean_constraint
         self.bias_rho_constraint    = bias_rho_constraint
 
+        self.sampled_weights = []
+        self.kernel_epsilon = None
+        self.bias_epsilon = None
+
         self.input_spec = InputSpec(min_ndim=2)
         self.supports_masking = True
 
@@ -260,17 +239,22 @@ class Bayesion(Layer):
         self.built = True
 
     def call(self, inputs):
+        self.sampled_weights = []
         # epsilon should be resampled for each input
-        self.kernel = self.kernel_distribution.sample()
+        self.kernel, self.kernel_epsilon = self.kernel_distribution.sample()
         self.variational_posterior = K.sum(self.kernel_distribution.log_likelihood(self.kernel))
         self.log_prior = K.sum(self.prior_distribution.log_prob(self.kernel))
+
+        self.sampled_weights.append(self.kernel)
 
         output = K.dot(inputs, self.kernel)
 
         if self.use_bias:
-            self.bias = self.bias_distribution.sample()
+            self.bias, self.bias_epsilon = self.bias_distribution.sample()
             self.variational_posterior += K.sum(self.bias_distribution.log_likelihood(self.bias))
             self.log_prior += K.sum(self.prior_distribution.log_prob(self.bias))
+
+            self.sampled_weights.append(self.bias)
 
             output = K.bias_add(output, self.bias)
         if self.activation is not None:
@@ -369,7 +353,7 @@ class BayesNN(tf.keras.Model):
 
         super(BayesNN, self).__init__()
         self.flatten = Flatten(input_shape=input_dim)
-        self.layer_1 = Bayesion(1200,
+        self.layer_1 = Bayesion(800,
                                 prior_mixture_std_1=prior_mixture_std_1,
                                 prior_mixture_std_2=prior_mixture_std_2,
                                 prior_mixture_mu_1=prior_mixture_mu_1,
@@ -381,7 +365,7 @@ class BayesNN(tf.keras.Model):
                                 bias_rho_initializer=bias_rho_initializer)
 
         self.activation_1 = Activation(activation)
-        self.layer_2 = Bayesion(1200,
+        self.layer_2 = Bayesion(800,
                                 prior_mixture_std_1=prior_mixture_std_1,
                                 prior_mixture_std_2=prior_mixture_std_2,
                                 prior_mixture_mu_1=prior_mixture_mu_1,
@@ -393,18 +377,18 @@ class BayesNN(tf.keras.Model):
                                 bias_rho_initializer=bias_rho_initializer)
 
         self.activation_2 = Activation(activation)
-        self.layer_3 = Bayesion(1200,
-                                prior_mixture_std_1=prior_mixture_std_1,
-                                prior_mixture_std_2=prior_mixture_std_2,
-                                prior_mixture_mu_1=prior_mixture_mu_1,
-                                prior_mixture_mu_2=prior_mixture_mu_2,
-                                prior_mixture_weight=prior_mixture_weight,
-                                kernel_mean_initializer=kernel_mean_initializer,
-                                kernel_rho_initializer=kernel_rho_initializer,
-                                bias_mean_initializer=bias_mean_initializer,
-                                bias_rho_initializer=bias_rho_initializer)
-
-        self.activation_3 = Activation(activation)
+        # self.layer_3 = Bayesion(1200,
+        #                         prior_mixture_std_1=prior_mixture_std_1,
+        #                         prior_mixture_std_2=prior_mixture_std_2,
+        #                         prior_mixture_mu_1=prior_mixture_mu_1,
+        #                         prior_mixture_mu_2=prior_mixture_mu_2,
+        #                         prior_mixture_weight=prior_mixture_weight,
+        #                         kernel_mean_initializer=kernel_mean_initializer,
+        #                         kernel_rho_initializer=kernel_rho_initializer,
+        #                         bias_mean_initializer=bias_mean_initializer,
+        #                         bias_rho_initializer=bias_rho_initializer)
+        #
+        # self.activation_3 = Activation(activation)
         self.final_layer = Bayesion(output_dim,
                                 prior_mixture_std_1=prior_mixture_std_1,
                                 prior_mixture_std_2=prior_mixture_std_2,
@@ -419,18 +403,58 @@ class BayesNN(tf.keras.Model):
         self.batch_size = batch_size
         self.output_dim = output_dim
 
+        self.mus = []
+        self.rhos = []
+        self.built_ = False
 
     #@tf.function
     def call(self, inputs):
+
+
+        sampled_weights = []
+        epsilons = []
+
         x = self.flatten(inputs)
+
+        ## LAYER 1
         x = self.layer_1(x)
         x = self.activation_1(x)
+        sampled_weights += self.layer_1.sampled_weights
+        epsilons.append(self.layer_1.kernel_epsilon)
+        epsilons.append(self.layer_1.bias_epsilon)
+
         x = self.layer_2(x)
         x = self.activation_2(x)
+        sampled_weights += self.layer_2.sampled_weights
+        epsilons.append(self.layer_2.kernel_epsilon)
+        epsilons.append(self.layer_2.bias_epsilon)
+
         #x = self.layer_3(x)
         #x = self.activation_3(x)
+
         x = self.final_layer(x)
-        return x, K.sum(self.losses)
+        sampled_weights += self.final_layer.sampled_weights
+        epsilons.append(self.final_layer.kernel_epsilon)
+        epsilons.append(self.final_layer.bias_epsilon)
+
+        if not self.built_:
+            self.built_ = True
+            self.mus.append(self.layer_1.kernel_mean)
+            self.mus.append(self.layer_1.bias_mean)
+            self.rhos.append(self.layer_1.kernel_rho)
+            self.rhos.append(self.layer_1.bias_rho)
+
+            self.mus.append(self.layer_2.kernel_mean)
+            self.mus.append(self.layer_2.bias_mean)
+            self.rhos.append(self.layer_2.kernel_rho)
+            self.rhos.append(self.layer_2.bias_rho)
+
+            self.mus.append(self.final_layer.kernel_mean)
+            self.mus.append(self.final_layer.bias_mean)
+            self.rhos.append(self.final_layer.kernel_rho)
+            self.rhos.append(self.final_layer.bias_rho)
+
+        return x, K.sum(self.losses), sampled_weights, epsilons
 
 
 

@@ -13,27 +13,27 @@ import sys
 
 np.set_printoptions(threshold=sys.maxsize)
 
-from tensorflow.python.ops import control_flow_util
-control_flow_util.ENABLE_CONTROL_FLOW_V2 = True
+#from tensorflow.python.ops import control_flow_util
+#control_flow_util.ENABLE_CONTROL_FLOW_V2 = True
 
 import argparse
 parser = argparse.ArgumentParser()
 parser.add_argument("-n", "--name")
 parser.add_argument("-s", "--samples", type=int, default=1)
 parser.add_argument("-S", "--savefrequency", type=int, default=25)
-parser.add_argument("-l", "--learningrate", type=float, default=0.001)
-parser.add_argument("-A", "--alpha", type=float, default=0.5)
+parser.add_argument("-l", "--learningrate", type=float, default=0.0001)
+parser.add_argument("-A", "--alpha", type=float, default=1)
 parser.add_argument("-B", "--beta", type=float, default=0)
 parser.add_argument("-a", "--activation", type=str, default="elu")
 parser.add_argument("-c", "--batches", type=int, default=128)
-parser.add_argument("-p", "--prior", nargs='+', default=[0, -6, 0, 0, 0.25])
-parser.add_argument("-k", "--kernel", nargs='+', default=[-1, 1, -5, -4])
-parser.add_argument("-b", "--bias", nargs='+', default=[-1, 1, -5, -4])
+parser.add_argument("-p", "--prior", nargs='+', default=[-1, -7, 0, 0, 0.25])
+parser.add_argument("-k", "--kernel", nargs='+', default=[-.1, .1, -5, -4])
+parser.add_argument("-b", "--bias", nargs='+', default=[-.1, .1, -5, -4])
 args = parser.parse_args()
 
 print(args)
 
-EPS = 1e-6
+EPS = 1e-9
 
 input_dim=(28,28)
 output_dim=10
@@ -79,16 +79,15 @@ model = BayesNN(input_dim,
 # The data, split between train and test sets:
 #(x_train, y_train), (x_test, y_test) = mnist.load_data()
 (X_TRAIN, Y_TRAIN), (x_test, y_test) = mnist.load_data()
-# x_mean = np.mean(x_train, axis = 0)
-# x_std = np.std(x_train, axis = 0)
-# x_train = (x_train.astype(np.float32) - x_mean) / (x_std + EPS)
-# x_test = (x_test.astype(np.float32) - x_mean) / (x_std + EPS)
-#x_train = x_train.astype(np.float32)
-random_indices = np.random.permutation(len(X_TRAIN))[:100]
-x_train = X_TRAIN[random_indices].astype(np.float32)
-y_train = Y_TRAIN[random_indices]
-np.delete(X_TRAIN, random_indices, 0)
-np.delete(Y_TRAIN, random_indices, 0)
+X_TRAIN = X_TRAIN.astype(np.float32) / 255
+x_test = x_test.astype(np.float32) / 255
+#random_indices = np.random.permutation(len(X_TRAIN))[:100]
+#x_train = X_TRAIN[random_indices].astype(np.float32)
+#y_train = Y_TRAIN[random_indices]
+#np.delete(X_TRAIN, random_indices, 0)
+#np.delete(Y_TRAIN, random_indices, 0)
+x_train = X_TRAIN
+y_train = Y_TRAIN
 
 x_test = x_test.astype(np.float32)
 
@@ -117,22 +116,42 @@ sampled_likelihood_losses = []
 sampled_losses = []
 sampled_grads = []
 
+def cross_entropy_loss(labels_ph, predictions):
+    labels_one_hot = tf.one_hot(labels_ph, 10)
+    pre_cross_entropy = labels_one_hot * tf.log(predictions+EPS)
+    cross_entropy_loss = -tf.reduce_sum(pre_cross_entropy)
+    return cross_entropy_loss
+
 for i in range(30):
     with tf.variable_scope('sample-{}'.format(i)):
-        predictions, complexity_loss = model(in_ph)
+        predictions, complexity_loss, sampled_weights, epsilons = model(in_ph)
         sampled_predictions.append(predictions)
-        likelihood_loss = tf.losses.softmax_cross_entropy(labels_one_hot, predictions)
+        softmax_predictions = tf.nn.softmax(predictions)
+        likelihood_loss = cross_entropy_loss(labels_ph, softmax_predictions)
+        #likelihood_loss = tf.losses.softmax_cross_entropy(labels_one_hot, predictions)
         #likelihood_loss = tf.reduce_mean(-tf.reduce_sum(labels_one_hot * tf.log(tf.nn.softmax(predictions)+EPS), axis=1))
         #probs = tf.nn.softmax(predictions)
-        #entropy = -tf.reduce_sum((probs * tf.log(probs+EPS)), axis=1)
-        #entropy_loss = tf.reduce_mean(tf.reduce_sum((1-labels_one_hot) * probs, axis=1) * entropy)
-        loss = alpha_ph * pi_ph * complexity_loss + (1 - alpha_ph) * likelihood_loss
+        #entropy = -tf.reduce_sum((softmax_predictions * tf.log(softmax_predictions+EPS)), axis=1)
+        #entropy_loss = tf.reduce_sum(tf.reduce_sum((1-labels_one_hot) * softmax_predictions, axis=1) * entropy)
+        loss =  pi_ph * complexity_loss + likelihood_loss
         sampled_complexity_losses.append((1/M)*complexity_loss)
         sampled_likelihood_losses.append(likelihood_loss)
         sampled_losses.append(loss)
 
         if i < samples:
-            grad = optimizer.compute_gradients(loss)
+            partial_sampled_weight_grads = tf.gradients(loss, sampled_weights)
+            partial_mu_grads = tf.gradients(loss, model.mus)
+            partial_rho_grads = tf.gradients(loss, model.rhos)
+
+            mu_grads = []
+            rho_grads = []
+
+            for j in range(len(partial_sampled_weight_grads)):
+                mu_grads.append(partial_sampled_weight_grads[j] + partial_mu_grads[j])
+                rho_grads.append(partial_sampled_weight_grads[j] * (epsilons[j] / (1 + tf.exp(-model.rhos[j]))) +
+                                 partial_rho_grads[j])
+
+            grad = list(zip(mu_grads + rho_grads, model.mus + model.rhos))
             sampled_grads.append(grad)
 
 test_stacked_predictions_op = tf.stack(sampled_predictions)
@@ -164,7 +183,7 @@ test_avg_epistemic_op = tf.reduce_mean(test_epistemic_op)
 test_avg_aleatoric_op = tf.reduce_mean(test_aleatoric_op)
 
 pre_entropy = tf.reduce_sum((1-labels_one_hot) * train_avg_prediction_op, axis=1) * train_entropy_op
-entropy_loss = -tf.reduce_mean(pre_entropy)
+entropy_loss = -tf.reduce_sum(pre_entropy)
 
 _, most_confusing = tf.math.top_k(test_entropy_op, k = 10)
 _, most_confident = tf.math.top_k(-test_entropy_op, k = 10)
@@ -177,7 +196,6 @@ train_avg_loss_op = tf.reduce_mean(tf.stack(sampled_losses[:samples]))
 test_avg_complexity_loss_op = tf.reduce_mean(tf.stack(sampled_complexity_losses))
 test_avg_likelihood_loss_op = tf.reduce_mean(tf.stack(sampled_likelihood_losses))
 test_avg_loss_op = tf.reduce_mean(tf.stack(sampled_losses))
-#test_avg_loss_op = tf.reduce_mean(tf.stack(sampled_losses))
 
 avg_grads_op = average_gradients(sampled_grads)
 #avg_grads_op = optimizer.compute_gradients(train_avg_loss_op)
@@ -260,15 +278,15 @@ with tf.Session() as sess:
         print("validation accuracy: {}".format(test_acc))
         print("training accuracy: {}".format(train_acc))
 
-        if epoch > 300 and epoch % 100 == 0:
-            r = np.random.permutation(len(X_TRAIN))[:5000]
-            train_top_confusing = sess.run(most_confusing, {in_ph: X_TRAIN[r], labels_ph: Y_TRAIN[r]})
-            x_train = np.concatenate([x_train, X_TRAIN[r[train_top_confusing]]])
-            y_train = np.concatenate([y_train, Y_TRAIN[r[train_top_confusing]]])
-            np.delete(X_TRAIN, r[train_top_confusing], 0)
-            np.delete(Y_TRAIN, r[train_top_confusing], 0)
-            N = len(x_train)
-            M = N // batch_size
+        # if epoch > 300 and epoch % 100 == 0:
+        #     r = np.random.permutation(len(X_TRAIN))[:5000]
+        #     train_top_confusing = sess.run(most_confusing, {in_ph: X_TRAIN[r], labels_ph: Y_TRAIN[r]})
+        #     x_train = np.concatenate([x_train, X_TRAIN[r[train_top_confusing]]])
+        #     y_train = np.concatenate([y_train, Y_TRAIN[r[train_top_confusing]]])
+        #     np.delete(X_TRAIN, r[train_top_confusing], 0)
+        #     np.delete(Y_TRAIN, r[train_top_confusing], 0)
+        #     N = len(x_train)
+        #     M = N // batch_size
 
         # if (epoch > 0) and (epoch % save_frequency == 0):
         #     model.save_weights(save_dir + 'epoch-{}'.format(epoch))
