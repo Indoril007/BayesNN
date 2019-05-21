@@ -81,13 +81,13 @@ model = BayesNN(input_dim,
 (X_TRAIN, Y_TRAIN), (x_test, y_test) = mnist.load_data()
 X_TRAIN = X_TRAIN.astype(np.float32) / 255
 x_test = x_test.astype(np.float32) / 255
-#random_indices = np.random.permutation(len(X_TRAIN))[:100]
-#x_train = X_TRAIN[random_indices].astype(np.float32)
-#y_train = Y_TRAIN[random_indices]
-#np.delete(X_TRAIN, random_indices, 0)
-#np.delete(Y_TRAIN, random_indices, 0)
-x_train = X_TRAIN
-y_train = Y_TRAIN
+random_indices = np.random.permutation(len(X_TRAIN))[:100]
+x_train = X_TRAIN[random_indices].astype(np.float32)
+y_train = Y_TRAIN[random_indices]
+np.delete(X_TRAIN, random_indices, 0)
+np.delete(Y_TRAIN, random_indices, 0)
+#x_train = X_TRAIN
+#y_train = Y_TRAIN
 
 x_test = x_test.astype(np.float32)
 
@@ -262,31 +262,33 @@ with tf.Session() as sess:
             step += 1
 
         random_indices = np.random.permutation(len(x_train))[:10000]
-        test_summaries, test_acc = sess.run([epoch_summaries_op, test_acc_op], feed_dict={in_ph: x_test,
-                                                                                          labels_ph: y_test,
-                                                                                          pi_ph: 1/M,
-                                                                                          alpha_ph: alpha})
-        train_summaries, train_acc = sess.run([epoch_summaries_op, test_acc_op],
-                                              feed_dict={in_ph: x_train[random_indices],
-                                                         labels_ph: y_train[random_indices],
-                                                         pi_ph: 1/M,
-                                                         alpha_ph: alpha})
 
-        test_summary_writer.add_summary(test_summaries, global_step=epoch)
-        train_summary_writer.add_summary(train_summaries, global_step=epoch)
+        if epoch > 1000 and epoch % 500 == 0:
+            test_summaries, test_acc = sess.run([epoch_summaries_op, test_acc_op], feed_dict={in_ph: x_test,
+                                                                                              labels_ph: y_test,
+                                                                                              pi_ph: 1/M,
+                                                                                              alpha_ph: alpha})
+            train_summaries, train_acc = sess.run([epoch_summaries_op, test_acc_op],
+                                                  feed_dict={in_ph: x_train[random_indices],
+                                                             labels_ph: y_train[random_indices],
+                                                             pi_ph: 1/M,
+                                                             alpha_ph: alpha})
 
-        print("validation accuracy: {}".format(test_acc))
-        print("training accuracy: {}".format(train_acc))
+            test_summary_writer.add_summary(test_summaries, global_step=epoch)
+            train_summary_writer.add_summary(train_summaries, global_step=epoch)
 
-        # if epoch > 300 and epoch % 100 == 0:
-        #     r = np.random.permutation(len(X_TRAIN))[:5000]
-        #     train_top_confusing = sess.run(most_confusing, {in_ph: X_TRAIN[r], labels_ph: Y_TRAIN[r]})
-        #     x_train = np.concatenate([x_train, X_TRAIN[r[train_top_confusing]]])
-        #     y_train = np.concatenate([y_train, Y_TRAIN[r[train_top_confusing]]])
-        #     np.delete(X_TRAIN, r[train_top_confusing], 0)
-        #     np.delete(Y_TRAIN, r[train_top_confusing], 0)
-        #     N = len(x_train)
-        #     M = N // batch_size
+            print("validation accuracy: {}".format(test_acc))
+            print("training accuracy: {}".format(train_acc))
+
+            r = np.random.permutation(len(X_TRAIN))[:5000]
+            train_top_confusing = sess.run(most_confusing, {in_ph: X_TRAIN[r], labels_ph: Y_TRAIN[r]})
+            #train_top_confusing = np.arange(10)
+            x_train = np.concatenate([x_train, X_TRAIN[r[train_top_confusing]]])
+            y_train = np.concatenate([y_train, Y_TRAIN[r[train_top_confusing]]])
+            np.delete(X_TRAIN, r[train_top_confusing], 0)
+            np.delete(Y_TRAIN, r[train_top_confusing], 0)
+            N = len(x_train)
+            M = N // batch_size
 
         # if (epoch > 0) and (epoch % save_frequency == 0):
         #     model.save_weights(save_dir + 'epoch-{}'.format(epoch))
