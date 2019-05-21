@@ -322,11 +322,15 @@ class BayesNN(tf.keras.Model):
         self.activation_1 = Activation('relu')
         self.layer_2 = Bayesion(400)
         self.activation_2 = Activation('relu')
+        #self.layer_3 = Bayesion(400)
+        #self.activation_3 = Activation('relu')
         self.final_layer = Bayesion(output_dim)
         #self.final_layer_activation = Activation('softmax')
         self.batch_size = batch_size
         self.output_dim = output_dim
         self.sampled_weights = []
+        self.mus = []
+        self.rhos = []
         self.epsilons = []
 
 
@@ -335,17 +339,39 @@ class BayesNN(tf.keras.Model):
         x = self.flatten(inputs)
         x = self.layer_1(x, self.batch_size)
         self.sampled_weights += self.layer_1.sampled_weights
+        self.mus.append(self.layer_1.kernel_mean)
+        self.mus.append(self.layer_1.bias_mean)
+        self.rhos.append(self.layer_1.kernel_rho)
+        self.rhos.append(self.layer_1.bias_rho)
         self.epsilons.append(self.layer_1.kernel_epsilon)
         self.epsilons.append(self.layer_1.bias_epsilon)
-
         x = self.activation_1(x)
+
         x = self.layer_2(x, self.batch_size)
+        self.mus.append(self.layer_2.kernel_mean)
+        self.mus.append(self.layer_2.bias_mean)
+        self.rhos.append(self.layer_2.kernel_rho)
+        self.rhos.append(self.layer_2.bias_rho)
         self.sampled_weights += self.layer_2.sampled_weights
         self.epsilons.append(self.layer_2.kernel_epsilon)
         self.epsilons.append(self.layer_2.bias_epsilon)
-
         x = self.activation_2(x)
+
+        #x = self.layer_3(x, self.batch_size)
+        #self.mus.append(self.layer_3.kernel_mean)
+        #self.mus.append(self.layer_3.bias_mean)
+        #self.rhos.append(self.layer_3.kernel_rho)
+        #self.rhos.append(self.layer_3.bias_rho)
+        #self.sampled_weights += self.layer_3.sampled_weights
+        #self.epsilons.append(self.layer_3.kernel_epsilon)
+        #self.epsilons.append(self.layer_3.bias_epsilon)
+        #x = self.activation_3(x)
+
         x = self.final_layer(x, self.batch_size)
+        self.mus.append(self.final_layer.kernel_mean)
+        self.mus.append(self.final_layer.bias_mean)
+        self.rhos.append(self.final_layer.kernel_rho)
+        self.rhos.append(self.final_layer.bias_rho)
         self.sampled_weights += self.final_layer.sampled_weights
         self.epsilons.append(self.final_layer.kernel_epsilon)
         self.epsilons.append(self.final_layer.bias_epsilon)

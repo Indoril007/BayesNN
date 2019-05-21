@@ -23,7 +23,7 @@ control_flow_util.ENABLE_CONTROL_FLOW_V2 = True
 
 batch_size = 128
 num_classes = 10
-epochs = 100
+epochs = 300
 data_augmentation = False
 bayesion = False
 num_predictions = 20
@@ -32,8 +32,8 @@ model_name = 'keras_cifar10_trained_model.h5'
 
 # The data, split between train and test sets:
 (x_train, y_train), (x_test, y_test) = mnist.load_data()
-x_train = x_train.astype(np.float32)
-x_test = x_test.astype(np.float32)
+x_train = x_train.astype(np.float32) / 255
+x_test = x_test.astype(np.float32) / 255
 
 N = len(x_train)
 M = N // batch_size
@@ -44,21 +44,33 @@ y_test_logits = keras.utils.to_categorical(y_test, num_classes)
 
 model = BayesNN(input_dim=(28, 28), output_dim=10, batch_size=batch_size)
 cce = CategoricalCrossentropy()
-optimizer = AdamOptimizer(learning_rate=0.003)
+optimizer = AdamOptimizer(learning_rate=0.0001)
 acc = tf.keras.metrics.Accuracy()
 
 in_ph = tf.placeholder(name='input', shape=(None, 28, 28), dtype=tf.float32)
-labels_ph = tf.placeholder(name='labels', shape=(None), dtype=tf.int32)
+labels_ph = tf.placeholder(name='labels', shape=(None,), dtype=tf.int32)
 
 predictions, complexity_loss = model(in_ph)
+predictions_softmax = tf.nn.softmax(predictions)
 #likelihood_loss = cce(labels_ph, predictions)
-likelihood_loss = tf.losses.sparse_softmax_cross_entropy(labels_ph, predictions)
+
+EPS = 1E-9
+
+def cross_entropy_loss(labels_ph, predictions):
+    labels_one_hot = tf.one_hot(labels_ph, 10)
+    pre_cross_entropy = labels_one_hot * tf.log(predictions+EPS)
+    cross_entropy_loss = -tf.reduce_sum(pre_cross_entropy)
+    return cross_entropy_loss
+
+#likelihood_loss = tf.losses.sparse_softmax_cross_entropy(labels_ph, predictions)
+likelihood_loss = cross_entropy_loss(labels_ph, predictions_softmax)
 
 prediction = tf.argmax(predictions, axis=1, output_type=tf.int32)
 #val_acc = acc(prediction, y_test)
 #val_acc, _ = tf.metrics.accuracy(prediction, y_test)
-correct_prediction = tf.equal(prediction, y_test)
+correct_prediction = tf.equal(prediction, labels_ph)
 val_acc = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
+
 
 weight = 1/M
 loss = weight * complexity_loss + likelihood_loss
@@ -66,13 +78,19 @@ step = tf.train.get_or_create_global_step()
 #grads = optimizer.compute_gradients(loss)
 
 partial_sampled_weight_grads = tf.gradients(loss, model.sampled_weights)
-partial_mean_grads = tf.gradients(loss,)
+partial_mu_grads = tf.gradients(loss, model.mus)
+partial_rho_grads = tf.gradients(loss, model.rhos)
 
+mu_grads = []
+rho_grads = []
+for i in range(len(partial_sampled_weight_grads)):
+    mu_grads.append(partial_sampled_weight_grads[i] + partial_mu_grads[i])
+    rho_grads.append(partial_sampled_weight_grads[i] * (model.epsilons[i]/(1+tf.exp(-model.rhos[i]))) + partial_rho_grads[i])
 
+grads = list(zip(mu_grads + rho_grads, model.mus + model.rhos))
 
-
-
-update = optimizer.minimize(loss, global_step=step)
+#update = optimizer.minimize(loss, global_step=step)
+update = optimizer.apply_gradients(grads, global_step=step)
 
 tf.summary.scalar('complexity_loss', complexity_loss)
 tf.summary.scalar('likelihood_loss', likelihood_loss)
@@ -81,12 +99,18 @@ tf.summary.scalar('loss', loss)
 init = tf.global_variables_initializer()
 
 summaries_op = tf.summary.merge_all()
+val_sum_op = tf.summary.scalar('validation_accuracy', val_acc)
+validation_loss = tf.summary.scalar('validation_loss', loss)
+training_loss = tf.summary.scalar('training_loss', loss)
+training_likelihood_loss = tf.summary.scalar('training_likelihood_loss', likelihood_loss)
+validation_likelihood_loss = tf.summary.scalar('validation_likelihood_loss', likelihood_loss)
 
 print(tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES))
 
-logdir = './summaries/run' + str(int(time.time()))
+logdir = './summaries/fixing_grads_normalized_custom_loss' + str(int(time.time()))
+logfile = './out5.txt'
 summary_writer = tf.summary.FileWriter(logdir)
-epochs = 100
+epochs = 500
 
 
 with tf.Session() as sess:
@@ -105,13 +129,33 @@ with tf.Session() as sess:
             #print(labels)
             #print("pred")
             #print(pred)
-            summaries, _ = sess.run([summaries_op, update], feed_dict)
+            summaries, _, pred, pred_sm = sess.run([summaries_op, update, predictions, predictions_softmax], feed_dict)
             summary_writer.add_summary(summaries, global_step=i+epoch*len(batches))
+            if (epoch % 10 == 0) and (i == 10):
+                with open(logfile, 'a+') as f:
+                    f.write('EPOCH: {}'.format(epoch))
+                    f.write('\n')
+                    f.write('PREDICTIONS')
+                    f.write('\n')
+                    f.write(pred.__repr__())
+                    f.write('\n')
+                    f.write('SOFTMAX')
+                    f.write('\n')
+                    f.write(pred_sm.__repr__())
+                    f.write('\n')
 
         #     if (i == 3):
         #         break
         # break
-        print("Validation accuracy: {}".format(sess.run(val_acc, {in_ph : x_test})))
+        val_loss, val_likelihood_loss, acc, val_sum = sess.run([validation_loss, validation_likelihood_loss, val_acc, val_sum_op], {in_ph : x_test, labels_ph: y_test})
+        summary_writer.add_summary(val_sum, global_step=epoch)
+        summary_writer.add_summary(val_loss, global_step=epoch)
+        summary_writer.add_summary(val_likelihood_loss, global_step=epoch)
+        train_loss, train_likelihood_loss = sess.run([training_loss, training_likelihood_loss], {in_ph : x_train, labels_ph: y_train})
+        summary_writer.add_summary(train_loss, global_step=epoch)
+        summary_writer.add_summary(train_likelihood_loss, global_step=epoch)
+
+        print("Validation accuracy: {}".format(acc))
 
 
 
