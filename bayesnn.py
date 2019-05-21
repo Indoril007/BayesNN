@@ -108,7 +108,7 @@ validation_likelihood_loss = tf.summary.scalar('validation_likelihood_loss', lik
 print(tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES))
 
 logdir = './summaries/fixing_grads_normalized_custom_loss' + str(int(time.time()))
-logfile = './out5.txt'
+logfile = './out6.txt'
 summary_writer = tf.summary.FileWriter(logdir)
 epochs = 500
 

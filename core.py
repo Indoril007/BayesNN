@@ -131,16 +131,16 @@ class Bayesion(Layer):
 
                  activation=None,
                  use_bias=True,
-                 prior_mixture_std_1 = np.exp(0).astype(np.float32),
-                 prior_mixture_std_2 = np.exp(-6).astype(np.float32),
+                 prior_mixture_std_1 = np.exp(-2).astype(np.float32),
+                 prior_mixture_std_2 = np.exp(-7).astype(np.float32),
                  prior_mixture_weight = 0.25,
-                 kernel_mean_initializer=initializers.RandomUniform(minval=-1, maxval=1),
+                 kernel_mean_initializer=initializers.RandomUniform(minval=-.1, maxval=.1),
                  kernel_rho_initializer=initializers.RandomUniform(minval=-5, maxval=-4),
                  kernel_mean_regularizer=None,
                  kernel_rho_regularizer=None,
                  kernel_mean_constraint=None,
                  kernel_rho_constraint=None,
-                 bias_mean_initializer=initializers.RandomUniform(minval=-0.1, maxval=0.1),
+                 bias_mean_initializer=initializers.RandomUniform(minval=-0.05, maxval=0.05),
                  bias_rho_initializer=initializers.RandomUniform(minval=-5, maxval=-4),
                  bias_mean_regularizer=None,
                  bias_rho_regularizer=None,
@@ -318,9 +318,9 @@ class BayesNN(tf.keras.Model):
     def __init__(self, input_dim, output_dim, batch_size=128):
         super(BayesNN, self).__init__()
         self.flatten = Flatten(input_shape=input_dim)
-        self.layer_1 = Bayesion(400)
+        self.layer_1 = Bayesion(800)
         self.activation_1 = Activation('relu')
-        self.layer_2 = Bayesion(400)
+        self.layer_2 = Bayesion(800)
         self.activation_2 = Activation('relu')
         #self.layer_3 = Bayesion(400)
         #self.activation_3 = Activation('relu')
