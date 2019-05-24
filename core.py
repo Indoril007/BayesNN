@@ -80,7 +80,6 @@ class ScaleMixtureGaussian(object):
         prob2 = K.exp(self.gaussian2.log_likelihood(x))
         return K.log(self.pi * prob1 + (1 - self.pi) * prob2)
 
-
 class Bayesion(Layer):
     """ A Bayesion Neural Network implemented with Bayes by Backprop
     [Weight Uncertaint in Neural Networks, C. Blundell 2015]
@@ -402,6 +401,8 @@ class BayesNN(tf.keras.Model):
 
         self.batch_size = batch_size
         self.output_dim = output_dim
+        self.variational_posterior = None
+        self.log_prior = None
 
         self.mus = []
         self.rhos = []
@@ -437,6 +438,11 @@ class BayesNN(tf.keras.Model):
         epsilons.append(self.final_layer.kernel_epsilon)
         epsilons.append(self.final_layer.bias_epsilon)
 
+        variational_posterior = self.layer_1.variational_posterior + self.layer_2.variational_posterior + \
+                                self.final_layer.variational_posterior
+
+        log_prior = self.layer_1.log_prior + self.layer_2.log_prior + self.final_layer.log_prior
+
         if not self.built_:
             self.built_ = True
             self.mus.append(self.layer_1.kernel_mean)
@@ -454,7 +460,7 @@ class BayesNN(tf.keras.Model):
             self.rhos.append(self.final_layer.kernel_rho)
             self.rhos.append(self.final_layer.bias_rho)
 
-        return x, K.sum(self.losses), sampled_weights, epsilons
+        return x, K.sum(self.losses), sampled_weights, epsilons, variational_posterior, log_prior
 
 
 
