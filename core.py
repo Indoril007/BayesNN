@@ -16,6 +16,110 @@ from tensorflow.python.keras.engine.input_spec import InputSpec
 #control_flow_util.ENABLE_CONTROL_FLOW_V2 = True
 
 
+def get_summaries(sampled):
+    test_stacked_predictions_op = tf.stack(sampled["prediction"])
+    train_stacked_predictions_op = tf.stack(sampled["prediction"][:samples])
+    test_avg_prediction_op = tf.reduce_mean(tf.nn.softmax(test_stacked_predictions_op), axis=0)
+    train_avg_prediction_op = tf.reduce_mean(tf.nn.softmax(train_stacked_predictions_op), axis=0)
+
+    train_entropy_op = -tf.reduce_sum((train_avg_prediction_op * tf.log(train_avg_prediction_op+EPS)), axis=1)
+    test_entropy_op = -tf.reduce_sum((test_avg_prediction_op * tf.log(test_avg_prediction_op+EPS)), axis=1)
+
+    train_avg_entropy_op = tf.reduce_mean(train_entropy_op)
+    test_avg_entropy_op = tf.reduce_mean(test_entropy_op)
+
+    train_aleatoric_op = tf.reduce_mean(-tf.reduce_sum(tf.nn.softmax(train_stacked_predictions_op) *
+                                                       tf.log(tf.nn.softmax(train_stacked_predictions_op)+EPS),
+                                                       axis=2), axis=0)
+    train_avg_aleatoric_op = tf.reduce_mean(train_aleatoric_op)
+
+    test_aleatoric_op = tf.reduce_mean(-tf.reduce_sum(tf.nn.softmax(test_stacked_predictions_op) *
+                                                      tf.log(tf.nn.softmax(test_stacked_predictions_op)+EPS),
+                                                      axis=2), axis=0)
+
+    train_avg_variational_posterior = tf.reduce_mean(tf.stack(sampled["variational_posterior"][:samples]))
+    train_avg_log_prior = tf.reduce_mean(tf.stack(sampled["log_prior"][:samples]))
+
+    test_avg_variational_posterior = tf.reduce_mean(tf.stack(sampled["variational_posterior"]))
+    test_avg_log_prior = tf.reduce_mean(tf.stack(sampled["log_prior"]))
+
+    train_epistemic_op = train_entropy_op - train_aleatoric_op
+    train_avg_epistemic_op = tf.reduce_mean(train_epistemic_op)
+
+    test_epistemic_op = train_entropy_op - train_aleatoric_op
+    test_avg_epistemic_op = tf.reduce_mean(test_epistemic_op)
+
+    test_avg_aleatoric_op = tf.reduce_mean(test_aleatoric_op)
+
+    pre_entropy = tf.reduce_sum((1-labels_one_hot) * train_avg_prediction_op, axis=1) * train_entropy_op
+    entropy_loss = -tf.reduce_sum(pre_entropy)
+
+    _, most_confusing = tf.math.top_k(test_entropy_op, k = 10)
+    _, most_confident = tf.math.top_k(-test_entropy_op, k = 10)
+
+    train_avg_complexity_loss_op = tf.reduce_mean(tf.stack(sampled["complexity_loss"][:samples]))
+    train_avg_likelihood_loss_op = tf.reduce_mean(tf.stack(sampled["likelihood_loss"][:samples]))
+    train_avg_loss_op = tf.reduce_mean(tf.stack(sampled["loss"][:samples]))
+    #train_avg_loss_op = tf.reduce_mean(tf.stack(sampled_losses[:samples])) + beta*entropy_loss
+
+    test_avg_complexity_loss_op = tf.reduce_mean(tf.stack(sampled["complexity_loss"]))
+    test_avg_likelihood_loss_op = tf.reduce_mean(tf.stack(sampled["likelihood_loss"]))
+    test_avg_loss_op = tf.reduce_mean(tf.stack(sampled["loss"]))
+
+    avg_grads_op = average_gradients(sampled["grad"])
+    #avg_grads_op = optimizer.compute_gradients(train_avg_loss_op)
+
+    test_prediction_op = tf.argmax(test_avg_prediction_op, axis=1, output_type=tf.int32)
+    test_correct_prediction_op = tf.equal(test_prediction_op, labels_ph)
+    test_avg_entropy_correct_op = tf.reduce_mean(tf.boolean_mask(test_entropy_op, test_correct_prediction_op))
+    test_std_entropy_correct_op = tf.math.reduce_std(tf.boolean_mask(test_entropy_op, test_correct_prediction_op))
+    test_avg_entropy_incorrect_op = tf.reduce_mean(tf.boolean_mask(test_entropy_op, tf.logical_not(test_correct_prediction_op)))
+    test_std_entropy_incorrect_op = tf.math.reduce_std(tf.boolean_mask(test_entropy_op, tf.logical_not(test_correct_prediction_op)))
+    test_avg_epistemic_incorrect_op = tf.reduce_mean(tf.boolean_mask(test_epistemic_op, tf.logical_not(test_correct_prediction_op)))
+    test_std_epistemic_incorrect_op = tf.math.reduce_std(tf.boolean_mask(test_epistemic_op, tf.logical_not(test_correct_prediction_op)))
+    test_avg_epistemic_correct_op = tf.reduce_mean(tf.boolean_mask(test_epistemic_op, test_correct_prediction_op))
+    test_std_epistemic_correct_op = tf.math.reduce_std(tf.boolean_mask(test_epistemic_op, test_correct_prediction_op))
+    test_avg_aleatoric_incorrect_op = tf.reduce_mean(tf.boolean_mask(test_aleatoric_op, tf.logical_not(test_correct_prediction_op)))
+    test_acc_op = tf.reduce_mean(tf.cast(test_correct_prediction_op, tf.float32))
+
+    update_op = optimizer.apply_gradients(avg_grads_op)
+
+    batch_summaries_op = tf.summary.merge([tf.summary.scalar('batch_avg_complexity_loss', train_avg_complexity_loss_op),
+                                           tf.summary.scalar('batch_avg_likelihood_loss', train_avg_likelihood_loss_op),
+                                           tf.summary.scalar('batch_avg_variational_posterior', train_avg_variational_posterior),
+                                           tf.summary.scalar('batch_avg_log_prior', train_avg_log_prior),
+                                           tf.summary.scalar('batch_avg_entropy_loss', entropy_loss),
+                                           tf.summary.scalar('batch_avg_entropy', train_avg_entropy_op),
+                                           tf.summary.scalar('batch_avg_aleatoric', train_avg_aleatoric_op),
+                                           tf.summary.scalar('batch_alpha', alpha_ph),
+                                           tf.summary.scalar('batch_avg_loss', train_avg_loss_op)])
+
+    epoch_summaries_op = tf.summary.merge([tf.summary.scalar('epoch_avg_complexity_loss', test_avg_complexity_loss_op),
+                                           tf.summary.scalar('epoch_avg_likelihood_loss', test_avg_likelihood_loss_op),
+                                           tf.summary.scalar('epoch_avg_variational_posterior', test_avg_variational_posterior),
+                                           tf.summary.scalar('epoch_avg_log_prior', test_avg_log_prior),
+                                           tf.summary.scalar('epoch_avg_entropy', test_avg_entropy_op),
+                                           tf.summary.scalar('epoch_avg_loss', test_avg_loss_op),
+                                           tf.summary.scalar('accuracy', test_acc_op),
+                                           tf.summary.scalar('avg_entropy_correct', test_avg_entropy_correct_op),
+                                           tf.summary.scalar('std_entropy_correct', test_std_entropy_correct_op),
+                                           tf.summary.scalar('avg_aleatoric_incorrect', test_avg_aleatoric_incorrect_op),
+                                           tf.summary.scalar('avg_epistemic_incorrect', test_avg_epistemic_incorrect_op),
+                                           tf.summary.scalar('std_epistemic_incorrect', test_std_epistemic_incorrect_op),
+                                           tf.summary.scalar('avg_epistemic_correct', test_avg_epistemic_correct_op),
+                                           tf.summary.scalar('std_epistemic_correct', test_std_epistemic_correct_op),
+                                           tf.summary.scalar('avg_entropy_incorrect', test_avg_entropy_incorrect_op),
+                                           tf.summary.scalar('std_entropy_incorrect', test_std_entropy_incorrect_op)])
+
+
+
+def cross_entropy_loss(labels_ph, predictions):
+    labels_one_hot = tf.one_hot(labels_ph, 10)
+    pre_cross_entropy = labels_one_hot * tf.log(predictions+EPS)
+    cross_entropy_loss = -tf.reduce_sum(pre_cross_entropy)
+    return cross_entropy_loss
+
+
 def average_gradients(tower_grads):
     average_grads = []
     for grad_and_vars in zip(*tower_grads):
@@ -323,7 +427,10 @@ class BayesNN(tf.keras.Model):
 
         self.variational_posterior = None
         self.log_prior = None
-        self.complexity_cost = None
+        self.complexity_loss = None
+        self.likelihood_loss = None
+        self.loss = None
+        self.prediction = None
 
     def call(self, inputs):
 
@@ -331,6 +438,10 @@ class BayesNN(tf.keras.Model):
         x = self.flatten(inputs)
         self.variational_posterior = 0
         self.log_prior = 0
+        self.complexity_loss = 0
+        self.likelihood_loss = None
+        self.loss = None
+        self.prediction = None
 
         for i in range(len(self.model_layers)):
             x = self.model_layers[i](x)
@@ -344,6 +455,7 @@ class BayesNN(tf.keras.Model):
         self.log_prior += self.final_layer.log_prior
         self.complexity_loss = self.variational_posterior - self.log_prior
 
+        self.prediction = x
         return x
 
     def grads(self, likelihood_loss, weight):
@@ -366,6 +478,17 @@ class BayesNN(tf.keras.Model):
             grads += list(zip(mu_grads + rho_grads, layer_mus + layer_rhos))
 
         return grads
+
+    def get_state(self):
+        state = {
+            "prediction": self.prediction,
+            "complexity_loss": self.complexity_loss,
+            "variational_posterior": self.variational_posterior,
+            "log_prior": self.log_prior,
+        }
+        return state
+
+
 
 
 class DropoutBayesNN(tf.keras.Model):
