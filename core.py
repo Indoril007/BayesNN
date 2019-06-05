@@ -259,8 +259,6 @@ class Bayesion(Layer):
         if self.activation is not None:
             output = self.activation(output)
 
-        #tf.summary.scalar('variational_posterior', self.variational_posterior)
-        #tf.summary.scalar('log_prior', self.log_prior)
         self.add_loss(self.variational_posterior - self.log_prior)
         return output
 
@@ -276,62 +274,9 @@ class Bayesion(Layer):
             'units': self.units,
             'activation': activations.serialize(self.activation),
             'use_bias': self.use_bias,
-            #'kernel_initializer': initializers.serialize(self.kernel_initializer),
-            #'bias_initializer': initializers.serialize(self.bias_initializer),
-            #'kernel_regularizer': regularizers.serialize(self.kernel_regularizer),
-            #'bias_regularizer': regularizers.serialize(self.bias_regularizer),
-            #'activity_regularizer':
-            #    regularizers.serialize(self.activity_regularizer),
-            #'kernel_constraint': constraints.serialize(self.kernel_constraint),
-            #'bias_constraint': constraints.serialize(self.bias_constraint)
         }
         base_config = super(Bayesion, self).get_config()
         return dict(list(base_config.items()) + list(config.items()))
-
-class DropoutBayesNN(tf.keras.Model):
-
-    def __init__(self,
-                 input_dim,
-                 output_dim,
-                 batch_size=128,
-                 activation = 'relu',
-                 dropout=0.5):
-
-        super(DropoutBayesNN, self).__init__()
-        self.flatten = Flatten(input_shape=input_dim)
-
-        self.layer_1 = Dense(800)
-        self.activation_1 = Activation(activation)
-        self.dropout_1 = Dropout(dropout)
-
-        self.layer_2 = Dense(800)
-        self.activation_2 = Activation(activation)
-        self.dropout_2 = Dropout(dropout)
-
-        self.layer_3 = Dense(800)
-        self.activation_3 = Activation(activation)
-        self.dropout_3 = Dropout(dropout)
-
-        self.final_layer = Dense(output_dim)
-
-        self.batch_size = batch_size
-        self.output_dim = output_dim
-
-    def call(self, inputs):
-        x = self.flatten(inputs)
-        x = self.layer_1(x)
-        x = self.activation_1(x)
-        x = self.dropout_1(x, training=True)
-        x = self.layer_2(x)
-        x = self.activation_2(x)
-        x = self.dropout_2(x, training=True)
-        x = self.layer_3(x)
-        x = self.activation_3(x)
-        x = self.dropout_3(x, training=True)
-        x = self.final_layer(x)
-        return x, 0
-
-
 
 class BayesNN(tf.keras.Model):
 
@@ -462,6 +407,49 @@ class BayesNN(tf.keras.Model):
 
         return x, K.sum(self.losses), sampled_weights, epsilons, variational_posterior, log_prior
 
+
+class DropoutBayesNN(tf.keras.Model):
+
+    def __init__(self,
+                 input_dim,
+                 output_dim,
+                 batch_size=128,
+                 activation = 'relu',
+                 dropout=0.5):
+
+        super(DropoutBayesNN, self).__init__()
+        self.flatten = Flatten(input_shape=input_dim)
+
+        self.layer_1 = Dense(800)
+        self.activation_1 = Activation(activation)
+        self.dropout_1 = Dropout(dropout)
+
+        self.layer_2 = Dense(800)
+        self.activation_2 = Activation(activation)
+        self.dropout_2 = Dropout(dropout)
+
+        self.layer_3 = Dense(800)
+        self.activation_3 = Activation(activation)
+        self.dropout_3 = Dropout(dropout)
+
+        self.final_layer = Dense(output_dim)
+
+        self.batch_size = batch_size
+        self.output_dim = output_dim
+
+    def call(self, inputs):
+        x = self.flatten(inputs)
+        x = self.layer_1(x)
+        x = self.activation_1(x)
+        x = self.dropout_1(x, training=True)
+        x = self.layer_2(x)
+        x = self.activation_2(x)
+        x = self.dropout_2(x, training=True)
+        x = self.layer_3(x)
+        x = self.activation_3(x)
+        x = self.dropout_3(x, training=True)
+        x = self.final_layer(x)
+        return x, 0
 
 
 if __name__ == "__main__":

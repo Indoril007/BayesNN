@@ -163,19 +163,19 @@ train_stacked_predictions_op = tf.stack(sampled_predictions[:samples])
 test_avg_prediction_op = tf.reduce_mean(tf.nn.softmax(test_stacked_predictions_op), axis=0)
 train_avg_prediction_op = tf.reduce_mean(tf.nn.softmax(train_stacked_predictions_op), axis=0)
 
-train_entropy_op = -tf.reduce_sum((train_avg_prediction_op * tf.log(train_avg_prediction_op+EPS)), axis=1)
-test_entropy_op = -tf.reduce_sum((test_avg_prediction_op * tf.log(test_avg_prediction_op+EPS)), axis=1)
+train_entropy_op = -tf.reduce_sum((train_avg_prediction_op * tf.log(train_avg_prediction_op+eps)), axis=1)
+test_entropy_op = -tf.reduce_sum((test_avg_prediction_op * tf.log(test_avg_prediction_op+eps)), axis=1)
 
 train_avg_entropy_op = tf.reduce_mean(train_entropy_op)
 test_avg_entropy_op = tf.reduce_mean(test_entropy_op)
 
 train_aleatoric_op = tf.reduce_mean(-tf.reduce_sum(tf.nn.softmax(train_stacked_predictions_op) *
-                                                   tf.log(tf.nn.softmax(train_stacked_predictions_op)+EPS),
+                                                   tf.log(tf.nn.softmax(train_stacked_predictions_op)+eps),
                                                    axis=2), axis=0)
 train_avg_aleatoric_op = tf.reduce_mean(train_aleatoric_op)
 
 test_aleatoric_op = tf.reduce_mean(-tf.reduce_sum(tf.nn.softmax(test_stacked_predictions_op) *
-                                                  tf.log(tf.nn.softmax(test_stacked_predictions_op)+EPS),
+                                                  tf.log(tf.nn.softmax(test_stacked_predictions_op)+eps),
                                                   axis=2), axis=0)
 
 train_avg_variational_posterior = tf.reduce_mean(tf.stack(sampled_variational_posteriors[:samples]))
