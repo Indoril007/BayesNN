@@ -238,13 +238,10 @@ class Bayesion(Layer):
         self.built = True
 
     def call(self, inputs):
-        self.sampled_weights = []
-        # epsilon should be resampled for each input
+
         self.kernel, self.kernel_epsilon = self.kernel_distribution.sample()
         self.variational_posterior = K.sum(self.kernel_distribution.log_likelihood(self.kernel))
         self.log_prior = K.sum(self.prior_distribution.log_prob(self.kernel))
-
-        self.sampled_weights.append(self.kernel)
 
         output = K.dot(inputs, self.kernel)
 
@@ -253,13 +250,10 @@ class Bayesion(Layer):
             self.variational_posterior += K.sum(self.bias_distribution.log_likelihood(self.bias))
             self.log_prior += K.sum(self.prior_distribution.log_prob(self.bias))
 
-            self.sampled_weights.append(self.bias)
-
             output = K.bias_add(output, self.bias)
         if self.activation is not None:
             output = self.activation(output)
 
-        self.add_loss(self.variational_posterior - self.log_prior)
         return output
 
     def compute_output_shape(self, input_shape):
@@ -283,6 +277,7 @@ class BayesNN(tf.keras.Model):
     def __init__(self,
                  input_dim,
                  output_dim,
+                 layer_sizes=(800, 800),
                  batch_size=128,
                  activation = 'relu',
                  prior_mixture_std_1 = np.exp(0).astype(np.float32),
@@ -297,42 +292,24 @@ class BayesNN(tf.keras.Model):
 
         super(BayesNN, self).__init__()
         self.flatten = Flatten(input_shape=input_dim)
-        self.layer_1 = Bayesion(800,
-                                prior_mixture_std_1=prior_mixture_std_1,
-                                prior_mixture_std_2=prior_mixture_std_2,
-                                prior_mixture_mu_1=prior_mixture_mu_1,
-                                prior_mixture_mu_2=prior_mixture_mu_2,
-                                prior_mixture_weight=prior_mixture_weight,
-                                kernel_mean_initializer=kernel_mean_initializer,
-                                kernel_rho_initializer=kernel_rho_initializer,
-                                bias_mean_initializer=bias_mean_initializer,
-                                bias_rho_initializer=bias_rho_initializer)
 
-        self.activation_1 = Activation(activation)
-        self.layer_2 = Bayesion(800,
-                                prior_mixture_std_1=prior_mixture_std_1,
-                                prior_mixture_std_2=prior_mixture_std_2,
-                                prior_mixture_mu_1=prior_mixture_mu_1,
-                                prior_mixture_mu_2=prior_mixture_mu_2,
-                                prior_mixture_weight=prior_mixture_weight,
-                                kernel_mean_initializer=kernel_mean_initializer,
-                                kernel_rho_initializer=kernel_rho_initializer,
-                                bias_mean_initializer=bias_mean_initializer,
-                                bias_rho_initializer=bias_rho_initializer)
+        self.model_layers = []
+        self.model_activations = []
 
-        self.activation_2 = Activation(activation)
-        # self.layer_3 = Bayesion(1200,
-        #                         prior_mixture_std_1=prior_mixture_std_1,
-        #                         prior_mixture_std_2=prior_mixture_std_2,
-        #                         prior_mixture_mu_1=prior_mixture_mu_1,
-        #                         prior_mixture_mu_2=prior_mixture_mu_2,
-        #                         prior_mixture_weight=prior_mixture_weight,
-        #                         kernel_mean_initializer=kernel_mean_initializer,
-        #                         kernel_rho_initializer=kernel_rho_initializer,
-        #                         bias_mean_initializer=bias_mean_initializer,
-        #                         bias_rho_initializer=bias_rho_initializer)
-        #
-        # self.activation_3 = Activation(activation)
+        for units in layer_sizes:
+            self.model_layers.append(Bayesion(units,
+                                     prior_mixture_std_1=prior_mixture_std_1,
+                                     prior_mixture_std_2=prior_mixture_std_2,
+                                     prior_mixture_mu_1=prior_mixture_mu_1,
+                                     prior_mixture_mu_2=prior_mixture_mu_2,
+                                     prior_mixture_weight=prior_mixture_weight,
+                                     kernel_mean_initializer=kernel_mean_initializer,
+                                     kernel_rho_initializer=kernel_rho_initializer,
+                                     bias_mean_initializer=bias_mean_initializer,
+                                     bias_rho_initializer=bias_rho_initializer))
+
+            self.model_activations.append(Activation(activation))
+
         self.final_layer = Bayesion(output_dim,
                                 prior_mixture_std_1=prior_mixture_std_1,
                                 prior_mixture_std_2=prior_mixture_std_2,
@@ -344,68 +321,51 @@ class BayesNN(tf.keras.Model):
                                 bias_mean_initializer=bias_mean_initializer,
                                 bias_rho_initializer=bias_rho_initializer)
 
-        self.batch_size = batch_size
-        self.output_dim = output_dim
         self.variational_posterior = None
         self.log_prior = None
+        self.complexity_cost = None
 
-        self.mus = []
-        self.rhos = []
-        self.built_ = False
-
-    #@tf.function
     def call(self, inputs):
 
 
-        sampled_weights = []
-        epsilons = []
-
         x = self.flatten(inputs)
+        self.variational_posterior = 0
+        self.log_prior = 0
 
-        ## LAYER 1
-        x = self.layer_1(x)
-        x = self.activation_1(x)
-        sampled_weights += self.layer_1.sampled_weights
-        epsilons.append(self.layer_1.kernel_epsilon)
-        epsilons.append(self.layer_1.bias_epsilon)
+        for i in range(len(self.model_layers)):
+            x = self.model_layers[i](x)
+            x = self.model_activations[i](x)
 
-        x = self.layer_2(x)
-        x = self.activation_2(x)
-        sampled_weights += self.layer_2.sampled_weights
-        epsilons.append(self.layer_2.kernel_epsilon)
-        epsilons.append(self.layer_2.bias_epsilon)
-
-        #x = self.layer_3(x)
-        #x = self.activation_3(x)
+            self.variational_posterior += self.model_layers[i].variational_posterior
+            self.log_prior += self.model_layers[i].log_prior
 
         x = self.final_layer(x)
-        sampled_weights += self.final_layer.sampled_weights
-        epsilons.append(self.final_layer.kernel_epsilon)
-        epsilons.append(self.final_layer.bias_epsilon)
+        self.variational_posterior += self.final_layer.variational_posterior
+        self.log_prior += self.final_layer.log_prior
+        self.complexity_loss = self.variational_posterior - self.log_prior
 
-        variational_posterior = self.layer_1.variational_posterior + self.layer_2.variational_posterior + \
-                                self.final_layer.variational_posterior
+        return x
 
-        log_prior = self.layer_1.log_prior + self.layer_2.log_prior + self.final_layer.log_prior
+    def grads(self, likelihood_loss, weight):
+        loss = weight * self.complexity_loss + likelihood_loss
+        grads = []
 
-        if not self.built_:
-            self.built_ = True
-            self.mus.append(self.layer_1.kernel_mean)
-            self.mus.append(self.layer_1.bias_mean)
-            self.rhos.append(self.layer_1.kernel_rho)
-            self.rhos.append(self.layer_1.bias_rho)
+        for layer in self.model_layers + [self.final_layer]:
+            layer_mus = [layer.kernel_mean, layer.bias_mean]
+            layer_rhos = [layer.kernel_rho, layer.bias_rho]
 
-            self.mus.append(self.layer_2.kernel_mean)
-            self.mus.append(self.layer_2.bias_mean)
-            self.rhos.append(self.layer_2.kernel_rho)
-            self.rhos.append(self.layer_2.bias_rho)
+            # Partial derivatives
+            dl_dkw, dl_dbw = tf.gradients(loss, [layer.kernel, layer.bias]) # dLoss / dKernelWeight & dLoss / dBiasWeight
+            dl_dkmu, dl_dbmu = tf.gradients(loss, layer_mus) # dLoss / dKernelMean & dLoss / dBiasMean
+            dl_dkrho, dl_dbrho = tf.gradients(loss, layer_rhos) # dLoss / dKernelRho & dLoss / dBiasRho
 
-            self.mus.append(self.final_layer.kernel_mean)
-            self.mus.append(self.final_layer.bias_mean)
-            self.rhos.append(self.final_layer.kernel_rho)
-            self.rhos.append(self.final_layer.bias_rho)
+            mu_grads = [dl_dkw + dl_dkmu, dl_dbw + dl_dbmu]
+            rho_grads = [dl_dkw * (layer.kernel_epsilon / (1 + tf.exp(-layer.kernel_rho))) + dl_dkrho,
+                         dl_dbw * (layer.bias_epsilon / (1 + tf.exp(-layer.bias_rho))) + dl_dbrho]
 
-        return x, K.sum(self.losses), sampled_weights, epsilons, variational_posterior, log_prior
+            grads += list(zip(mu_grads + rho_grads, layer_mus + layer_rhos))
+
+        return grads
 
 
 class DropoutBayesNN(tf.keras.Model):

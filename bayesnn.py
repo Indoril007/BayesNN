@@ -81,13 +81,13 @@ model = BayesNN(input_dim,
 (X_TRAIN, Y_TRAIN), (x_test, y_test) = mnist.load_data()
 X_TRAIN = X_TRAIN.astype(np.float32) / 255
 x_test = x_test.astype(np.float32) / 255
-random_indices = np.random.permutation(len(X_TRAIN))[:200]
-x_train = X_TRAIN[random_indices].astype(np.float32)
-y_train = Y_TRAIN[random_indices]
-np.delete(X_TRAIN, random_indices, 0)
-np.delete(Y_TRAIN, random_indices, 0)
-#x_train = X_TRAIN
-#y_train = Y_TRAIN
+# random_indices = np.random.permutation(len(X_TRAIN))[:200]
+# x_train = X_TRAIN[random_indices].astype(np.float32)
+# y_train = Y_TRAIN[random_indices]
+# np.delete(X_TRAIN, random_indices, 0)
+# np.delete(Y_TRAIN, random_indices, 0)
+x_train = X_TRAIN
+y_train = Y_TRAIN
 
 x_test = x_test.astype(np.float32)
 
@@ -126,56 +126,40 @@ def cross_entropy_loss(labels_ph, predictions):
 
 for i in range(30):
     with tf.variable_scope('sample-{}'.format(i)):
-        predictions, complexity_loss, sampled_weights, epsilons, variational_posterior, log_prior = model(in_ph)
+        predictions = model(in_ph)
         sampled_predictions.append(predictions)
-        sampled_variational_posteriors.append(variational_posterior)
-        sampled_log_priors.append(log_prior)
+        sampled_variational_posteriors.append(model.variational_posterior)
+        sampled_log_priors.append(model.log_prior)
         softmax_predictions = tf.nn.softmax(predictions)
         likelihood_loss = cross_entropy_loss(labels_ph, softmax_predictions)
-        #likelihood_loss = tf.losses.softmax_cross_entropy(labels_one_hot, predictions)
-        #likelihood_loss = tf.reduce_mean(-tf.reduce_sum(labels_one_hot * tf.log(tf.nn.softmax(predictions)+EPS), axis=1))
-        #probs = tf.nn.softmax(predictions)
-        #entropy = -tf.reduce_sum((softmax_predictions * tf.log(softmax_predictions+EPS)), axis=1)
-        #entropy_loss = tf.reduce_sum(tf.reduce_sum((1-labels_one_hot) * softmax_predictions, axis=1) * entropy)
-        loss =  pi_ph * complexity_loss + likelihood_loss
-        sampled_complexity_losses.append((1/M)*complexity_loss)
+
+        sampled_complexity_losses.append((1/M)*model.complexity_loss)
         sampled_likelihood_losses.append(likelihood_loss)
+
+        loss = (1/M) * model.complexity_loss + likelihood_loss
         sampled_losses.append(loss)
 
         if i < samples:
-            partial_sampled_weight_grads = tf.gradients(loss, sampled_weights)
-            partial_mu_grads = tf.gradients(loss, model.mus)
-            partial_rho_grads = tf.gradients(loss, model.rhos)
-
-            mu_grads = []
-            rho_grads = []
-
-            for j in range(len(partial_sampled_weight_grads)):
-                mu_grads.append(partial_sampled_weight_grads[j] + partial_mu_grads[j])
-                rho_grads.append(partial_sampled_weight_grads[j] * (epsilons[j] / (1 + tf.exp(-model.rhos[j]))) +
-                                 partial_rho_grads[j])
-
-            grad = list(zip(mu_grads + rho_grads, model.mus + model.rhos))
-            sampled_grads.append(grad)
+            sampled_grads.append(model.grads(likelihood_loss, weight=1/M))
 
 test_stacked_predictions_op = tf.stack(sampled_predictions)
 train_stacked_predictions_op = tf.stack(sampled_predictions[:samples])
 test_avg_prediction_op = tf.reduce_mean(tf.nn.softmax(test_stacked_predictions_op), axis=0)
 train_avg_prediction_op = tf.reduce_mean(tf.nn.softmax(train_stacked_predictions_op), axis=0)
 
-train_entropy_op = -tf.reduce_sum((train_avg_prediction_op * tf.log(train_avg_prediction_op+eps)), axis=1)
-test_entropy_op = -tf.reduce_sum((test_avg_prediction_op * tf.log(test_avg_prediction_op+eps)), axis=1)
+train_entropy_op = -tf.reduce_sum((train_avg_prediction_op * tf.log(train_avg_prediction_op+EPS)), axis=1)
+test_entropy_op = -tf.reduce_sum((test_avg_prediction_op * tf.log(test_avg_prediction_op+EPS)), axis=1)
 
 train_avg_entropy_op = tf.reduce_mean(train_entropy_op)
 test_avg_entropy_op = tf.reduce_mean(test_entropy_op)
 
 train_aleatoric_op = tf.reduce_mean(-tf.reduce_sum(tf.nn.softmax(train_stacked_predictions_op) *
-                                                   tf.log(tf.nn.softmax(train_stacked_predictions_op)+eps),
+                                                   tf.log(tf.nn.softmax(train_stacked_predictions_op)+EPS),
                                                    axis=2), axis=0)
 train_avg_aleatoric_op = tf.reduce_mean(train_aleatoric_op)
 
 test_aleatoric_op = tf.reduce_mean(-tf.reduce_sum(tf.nn.softmax(test_stacked_predictions_op) *
-                                                  tf.log(tf.nn.softmax(test_stacked_predictions_op)+eps),
+                                                  tf.log(tf.nn.softmax(test_stacked_predictions_op)+EPS),
                                                   axis=2), axis=0)
 
 train_avg_variational_posterior = tf.reduce_mean(tf.stack(sampled_variational_posteriors[:samples]))
@@ -275,24 +259,24 @@ with tf.Session() as sess:
             batch_summary_writer.add_summary(batch_summaries, global_step=step)
             step += 1
 
-        if epoch > 1 and epoch % 300 == 0:
-            random_indices = np.random.permutation(len(x_train))[:10000]
+        #if epoch > 1 and epoch % 300 == 0:
+        random_indices = np.random.permutation(len(x_train))[:10000]
 
-            test_summaries, test_acc = sess.run([epoch_summaries_op, test_acc_op], feed_dict={in_ph: x_test,
-                                                                                              labels_ph: y_test,
-                                                                                              pi_ph: 1/M,
-                                                                                              alpha_ph: alpha})
-            train_summaries, train_acc = sess.run([epoch_summaries_op, test_acc_op],
-                                                  feed_dict={in_ph: x_train[random_indices],
-                                                             labels_ph: y_train[random_indices],
-                                                             pi_ph: 1/M,
-                                                             alpha_ph: alpha})
+        test_summaries, test_acc = sess.run([epoch_summaries_op, test_acc_op], feed_dict={in_ph: x_test,
+                                                                                          labels_ph: y_test,
+                                                                                          pi_ph: 1/M,
+                                                                                          alpha_ph: alpha})
+        train_summaries, train_acc = sess.run([epoch_summaries_op, test_acc_op],
+                                              feed_dict={in_ph: x_train[random_indices],
+                                                         labels_ph: y_train[random_indices],
+                                                         pi_ph: 1/M,
+                                                         alpha_ph: alpha})
 
-            test_summary_writer.add_summary(test_summaries, global_step=epoch)
-            train_summary_writer.add_summary(train_summaries, global_step=epoch)
+        test_summary_writer.add_summary(test_summaries, global_step=epoch)
+        train_summary_writer.add_summary(train_summaries, global_step=epoch)
 
-            print("validation accuracy: {}".format(test_acc))
-            print("training accuracy: {}".format(train_acc))
+        print("validation accuracy: {}".format(test_acc))
+        print("training accuracy: {}".format(train_acc))
 
         # if epoch > 1000 and epoch % 500 == 0:
         #     r = np.random.permutation(len(X_TRAIN))[:5000]
