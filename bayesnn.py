@@ -20,11 +20,13 @@ import argparse
 parser = argparse.ArgumentParser()
 parser.add_argument("-n", "--name")
 parser.add_argument("-s", "--samples", type=int, default=1)
-parser.add_argument("-S", "--savefrequency", type=int, default=25)
+parser.add_argument("-i", "--initial_size", type=int, default=50)
+parser.add_argument("-f", "--final_size", type=int, default=200)
+parser.add_argument("-t", "--initial_iterations", type=int, default=1000)
+parser.add_argument("-T", "--step_iterations", type=int, default=500)
 parser.add_argument("-l", "--learningrate", type=float, default=0.0001)
-parser.add_argument("-A", "--alpha", type=float, default=1)
-parser.add_argument("-B", "--beta", type=float, default=0)
 parser.add_argument("-a", "--activation", type=str, default="elu")
+parser.add_argument("-S", "--sampling_type", type=str, default="random", choices=["random", "entropy", "epistemic"])
 parser.add_argument("-c", "--batches", type=int, default=128)
 parser.add_argument("-p", "--prior", nargs='+', default=[-1, -7, 0, 0, 0.25])
 parser.add_argument("-k", "--kernel", nargs='+', default=[-.1, .1, -5, -4])
@@ -45,16 +47,12 @@ save_dir = './saves/' + args.name + '-' + str(int(time.time())) + '/'
 log_dir = './logs/' + args.name + '-' + str(int(time.time())) + '.txt'
 with open(log_dir, 'w') as log_file:
     log_file.write(str(args) + '\n')
+
 num_classes = 10
 epochs = 50000
 alpha = args.alpha
 beta = args.beta
 save_frequency = args.savefrequency
-
-# model = DropoutBayesNN(input_dim,
-#                        output_dim,
-#                        batch_size=batch_size,
-#                        activation=args.activation)
 
 model = BayesNN(input_dim,
                 output_dim,
@@ -81,13 +79,13 @@ model = BayesNN(input_dim,
 (X_TRAIN, Y_TRAIN), (x_test, y_test) = mnist.load_data()
 X_TRAIN = X_TRAIN.astype(np.float32) / 255
 x_test = x_test.astype(np.float32) / 255
-# random_indices = np.random.permutation(len(X_TRAIN))[:200]
-# x_train = X_TRAIN[random_indices].astype(np.float32)
-# y_train = Y_TRAIN[random_indices]
-# np.delete(X_TRAIN, random_indices, 0)
-# np.delete(Y_TRAIN, random_indices, 0)
-x_train = X_TRAIN
-y_train = Y_TRAIN
+random_indices = np.random.permutation(len(X_TRAIN))[:args.initial_size]
+x_train = X_TRAIN[random_indices].astype(np.float32)
+y_train = Y_TRAIN[random_indices]
+np.delete(X_TRAIN, random_indices, 0)
+np.delete(Y_TRAIN, random_indices, 0)
+#x_train = X_TRAIN
+#y_train = Y_TRAIN
 
 x_test = x_test.astype(np.float32)
 
@@ -105,6 +103,7 @@ acc = tf.keras.metrics.Accuracy()
 
 in_ph = tf.placeholder(name='input', shape=(None, 28, 28), dtype=tf.float32)
 labels_ph = tf.placeholder(name='labels', shape=(None,), dtype=tf.int32)
+complexity_weight_ph = tf.placeholder(name='complexity_weight', shape=(), dtype=tf.float32)
 
 labels_one_hot = tf.one_hot(labels_ph, 10)
 
@@ -164,34 +163,37 @@ with tf.Session() as sess:
             batch_summary_writer.add_summary(batch_summaries, global_step=step)
             step += 1
 
-        #if epoch > 1 and epoch % 300 == 0:
-        random_indices = np.random.permutation(len(x_train))[:10000]
+        if epoch > 1 and epoch % 250 == 0:
+            random_indices = np.random.permutation(len(x_train))[:10000]
 
-        test_summaries, test_acc = sess.run([epoch_summaries_op, ops["acc_op"]], feed_dict={in_ph: x_test,
-                                                                                            labels_ph: y_test})
-        train_summaries, train_acc = sess.run([epoch_summaries_op, ops["acc_op"]],
-                                              feed_dict={in_ph: x_train[random_indices],
-                                                         labels_ph: y_train[random_indices]})
+            test_summaries, test_acc = sess.run([epoch_summaries_op, ops["acc_op"]], feed_dict={in_ph: x_test,
+                                                                                                labels_ph: y_test})
+            train_summaries, train_acc = sess.run([epoch_summaries_op, ops["acc_op"]],
+                                                  feed_dict={in_ph: x_train[random_indices],
+                                                             labels_ph: y_train[random_indices]})
 
-        test_summary_writer.add_summary(test_summaries, global_step=epoch)
-        train_summary_writer.add_summary(train_summaries, global_step=epoch)
+            test_summary_writer.add_summary(test_summaries, global_step=epoch)
+            train_summary_writer.add_summary(train_summaries, global_step=epoch)
 
-        print("validation accuracy: {}".format(test_acc))
-        print("training accuracy: {}".format(train_acc))
+            print("validation accuracy: {}".format(test_acc))
+            print("training accuracy: {}".format(train_acc))
 
-        # if epoch > 1000 and epoch % 500 == 0:
-        #     r = np.random.permutation(len(X_TRAIN))[:5000]
-        #     train_top_confusing = sess.run(most_confusing, {in_ph: X_TRAIN[r], labels_ph: Y_TRAIN[r]})
-        #     #train_top_confusing = np.arange(10)
-        #     x_train = np.concatenate([x_train, X_TRAIN[r[train_top_confusing]]])
-        #     y_train = np.concatenate([y_train, Y_TRAIN[r[train_top_confusing]]])
-        #     np.delete(X_TRAIN, r[train_top_confusing], 0)
-        #     np.delete(Y_TRAIN, r[train_top_confusing], 0)
-        #     N = len(x_train)
-        #     M = N // batch_size
+        if epoch >= args.initial_iterations and epoch % args.step_iterations == 0 and len(x_train) < args.final_size:
+            r = np.random.permutation(len(X_TRAIN))[:10000]
 
-        # if (epoch > 0) and (epoch % save_frequency == 0):
-        #     model.save_weights(save_dir + 'epoch-{}'.format(epoch))
+            if args.sampling_type == "random":
+                train_top_confusing = np.arange(10)
+            elif args.sampling_type == "entropy":
+                train_top_confusing = sess.run(ops["top_entropy_indices"], {in_ph: X_TRAIN[r], labels_ph: Y_TRAIN[r]})
+            elif args.sampling_type == "epistemic":
+                train_top_confusing = sess.run(ops["top_epistemic_indices"], {in_ph: X_TRAIN[r], labels_ph: Y_TRAIN[r]})
+
+            x_train = np.concatenate([x_train, X_TRAIN[r[train_top_confusing]]])
+            y_train = np.concatenate([y_train, Y_TRAIN[r[train_top_confusing]]])
+            np.delete(X_TRAIN, r[train_top_confusing], 0)
+            np.delete(Y_TRAIN, r[train_top_confusing], 0)
+            N = len(x_train)
+            M = N // batch_size
 
 
 

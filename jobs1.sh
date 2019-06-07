@@ -1,0 +1,1 @@
+python bayesnn.py -n test -s 10 -i 50 -f 200 -t 1000 -T 500
