@@ -22,6 +22,7 @@ def get_summaries(sampled, labels_ph):
     avg_prediction_op = tf.reduce_mean(tf.nn.softmax(stacked_predictions_op), axis=0)
     entropy_op = -tf.reduce_sum((avg_prediction_op * tf.log(avg_prediction_op+EPS)), axis=1)
     avg_entropy_op = tf.reduce_mean(entropy_op)
+    max_entropy_op = tf.reduce_max(entropy_op)
 
     aleatoric_op = tf.reduce_mean(-tf.reduce_sum(tf.nn.softmax(stacked_predictions_op) *
                                                       tf.log(tf.nn.softmax(stacked_predictions_op)+EPS),
@@ -32,10 +33,11 @@ def get_summaries(sampled, labels_ph):
 
     epistemic_op = entropy_op - aleatoric_op
     avg_epistemic_op = tf.reduce_mean(epistemic_op)
+    max_epistemic_op = tf.reduce_max(epistemic_op)
     avg_aleatoric_op = tf.reduce_mean(aleatoric_op)
 
-    _, most_confusing = tf.math.top_k(entropy_op, k=10)
-    _, most_confident = tf.math.top_k(-entropy_op, k=10)
+    _, top_entropy_indices = tf.math.top_k(entropy_op, k=10)
+    _, top_epistemic_indices = tf.math.top_k(epistemic_op, k=10)
 
     avg_complexity_loss_op = tf.reduce_mean(tf.stack(sampled["complexity_loss"]))
     avg_likelihood_loss_op = tf.reduce_mean(tf.stack(sampled["likelihood_loss"]))
@@ -61,8 +63,10 @@ def get_summaries(sampled, labels_ph):
                                            tf.summary.scalar('batch_avg_variational_posterior', avg_variational_posterior),
                                            tf.summary.scalar('batch_avg_log_prior', avg_log_prior),
                                            tf.summary.scalar('batch_avg_entropy', avg_entropy_op),
+                                           tf.summary.scalar('batch_max_entropy', max_entropy_op),
                                            tf.summary.scalar('batch_avg_aleatoric', avg_aleatoric_op),
                                            tf.summary.scalar('batch_avg_epistemic', avg_epistemic_op),
+                                           tf.summary.scalar('batch_max_epistemic', max_epistemic_op),
                                            tf.summary.scalar('batch_avg_loss', avg_loss_op)])
 
     epoch_summaries_op = tf.summary.merge([tf.summary.scalar('epoch_avg_complexity_loss', avg_complexity_loss_op),
@@ -70,6 +74,9 @@ def get_summaries(sampled, labels_ph):
                                            tf.summary.scalar('epoch_avg_variational_posterior', avg_variational_posterior),
                                            tf.summary.scalar('epoch_avg_log_prior', avg_log_prior),
                                            tf.summary.scalar('epoch_avg_entropy', avg_entropy_op),
+                                           tf.summary.scalar('epoch_max_entropy', max_entropy_op),
+                                           tf.summary.scalar('epoch_avg_epistemic', avg_epistemic_op),
+                                           tf.summary.scalar('epoch_max_epistemic', max_epistemic_op),
                                            tf.summary.scalar('epoch_avg_loss', avg_loss_op),
                                            tf.summary.scalar('accuracy', acc_op),
                                            tf.summary.scalar('avg_entropy_correct', avg_entropy_correct_op),
@@ -82,7 +89,15 @@ def get_summaries(sampled, labels_ph):
                                            tf.summary.scalar('avg_entropy_incorrect', avg_entropy_incorrect_op),
                                            tf.summary.scalar('std_entropy_incorrect', std_entropy_incorrect_op)])
 
-    return batch_summaries_op, epoch_summaries_op, acc_op
+    ops = {
+        "acc_op": acc_op,
+        "top_entropy_indices": top_entropy_indices,
+        "top_epistemic_indices": top_epistemic_indices,
+        "entropy_op": entropy_op,
+        "epistemic_op": epistemic_op,
+    }
+
+    return batch_summaries_op, epoch_summaries_op, ops
 
 
 

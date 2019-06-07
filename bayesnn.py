@@ -139,7 +139,7 @@ for i in range(samples):
 avg_grads_op = average_gradients(sampled["grad"])
 update_op = optimizer.apply_gradients(avg_grads_op)
 
-batch_summaries_op, epoch_summaries_op, acc_op = get_summaries(sampled, labels_ph)
+batch_summaries_op, epoch_summaries_op, ops = get_summaries(sampled, labels_ph)
 
 init = tf.global_variables_initializer()
 
@@ -167,9 +167,9 @@ with tf.Session() as sess:
         #if epoch > 1 and epoch % 300 == 0:
         random_indices = np.random.permutation(len(x_train))[:10000]
 
-        test_summaries, test_acc = sess.run([epoch_summaries_op, acc_op], feed_dict={in_ph: x_test,
-                                                                                          labels_ph: y_test})
-        train_summaries, train_acc = sess.run([epoch_summaries_op, acc_op],
+        test_summaries, test_acc = sess.run([epoch_summaries_op, ops["acc_op"]], feed_dict={in_ph: x_test,
+                                                                                            labels_ph: y_test})
+        train_summaries, train_acc = sess.run([epoch_summaries_op, ops["acc_op"]],
                                               feed_dict={in_ph: x_train[random_indices],
                                                          labels_ph: y_train[random_indices]})
 
