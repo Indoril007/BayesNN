@@ -8,7 +8,7 @@ from tensorflow.keras.datasets import mnist
 from tensorflow.keras import initializers
 from tensorflow.train import AdamOptimizer
 from tensorflow.keras.losses import CategoricalCrossentropy
-from core import BayesNN, average_gradients, DropoutBayesNN
+from core import BayesNN, average_gradients, get_summaries
 import sys
 
 np.set_printoptions(threshold=sys.maxsize)
@@ -104,8 +104,6 @@ optimizer = AdamOptimizer(learning_rate=learning_rate)
 acc = tf.keras.metrics.Accuracy()
 
 in_ph = tf.placeholder(name='input', shape=(None, 28, 28), dtype=tf.float32)
-pi_ph = tf.placeholder(name='alpha', shape=(), dtype=tf.float32)
-alpha_ph = tf.placeholder(name='alpha', shape=(), dtype=tf.float32)
 labels_ph = tf.placeholder(name='labels', shape=(None,), dtype=tf.int32)
 
 labels_one_hot = tf.one_hot(labels_ph, 10)
@@ -138,6 +136,10 @@ for i in range(samples):
         for key, val in model.get_state().items():
             sampled[key].append(val)
 
+avg_grads_op = average_gradients(sampled["grad"])
+update_op = optimizer.apply_gradients(avg_grads_op)
+
+batch_summaries_op, epoch_summaries_op, acc_op = get_summaries(sampled, labels_ph)
 
 init = tf.global_variables_initializer()
 
@@ -157,7 +159,7 @@ with tf.Session() as sess:
             #pi = (2**(M-(i+1))) / ((2**M) - 1)
             pi = 1/M
             batch = batches[i]
-            feed_dict = {in_ph: x_train[batch], labels_ph : y_train[batch], pi_ph: pi, alpha_ph : alpha}
+            feed_dict = {in_ph: x_train[batch], labels_ph : y_train[batch]}
             batch_summaries, _ = sess.run([batch_summaries_op, update_op], feed_dict)
             batch_summary_writer.add_summary(batch_summaries, global_step=step)
             step += 1
@@ -165,15 +167,11 @@ with tf.Session() as sess:
         #if epoch > 1 and epoch % 300 == 0:
         random_indices = np.random.permutation(len(x_train))[:10000]
 
-        test_summaries, test_acc = sess.run([epoch_summaries_op, test_acc_op], feed_dict={in_ph: x_test,
-                                                                                          labels_ph: y_test,
-                                                                                          pi_ph: 1/M,
-                                                                                          alpha_ph: alpha})
-        train_summaries, train_acc = sess.run([epoch_summaries_op, test_acc_op],
+        test_summaries, test_acc = sess.run([epoch_summaries_op, acc_op], feed_dict={in_ph: x_test,
+                                                                                          labels_ph: y_test})
+        train_summaries, train_acc = sess.run([epoch_summaries_op, acc_op],
                                               feed_dict={in_ph: x_train[random_indices],
-                                                         labels_ph: y_train[random_indices],
-                                                         pi_ph: 1/M,
-                                                         alpha_ph: alpha})
+                                                         labels_ph: y_train[random_indices]})
 
         test_summary_writer.add_summary(test_summaries, global_step=epoch)
         train_summary_writer.add_summary(train_summaries, global_step=epoch)
