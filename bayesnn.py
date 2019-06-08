@@ -6,10 +6,11 @@ import tensorflow as tf
 import tensorflow.keras as keras
 from tensorflow.keras.datasets import mnist
 from tensorflow.keras import initializers
-from tensorflow.train import AdamOptimizer
+from tensorflow.train import AdamOptimizer, GradientDescentOptimizer
 from tensorflow.keras.losses import CategoricalCrossentropy
 from core import BayesNN, average_gradients, get_summaries
 import sys
+import os
 
 np.set_printoptions(threshold=sys.maxsize)
 
@@ -20,17 +21,20 @@ import argparse
 parser = argparse.ArgumentParser()
 parser.add_argument("-n", "--name")
 parser.add_argument("-s", "--samples", type=int, default=1)
+parser.add_argument("-e", "--epochs", type=int, default=4000)
 parser.add_argument("-i", "--initial_size", type=int, default=50)
 parser.add_argument("-f", "--final_size", type=int, default=200)
 parser.add_argument("-t", "--initial_iterations", type=int, default=1000)
 parser.add_argument("-T", "--step_iterations", type=int, default=500)
 parser.add_argument("-l", "--learningrate", type=float, default=0.0001)
+parser.add_argument("-L", "--layer_sizes", nargs='+', default=[100, 100])
 parser.add_argument("-a", "--activation", type=str, default="elu")
 parser.add_argument("-S", "--sampling_type", type=str, default="random", choices=["random", "entropy", "epistemic"])
 parser.add_argument("-c", "--batches", type=int, default=128)
 parser.add_argument("-p", "--prior", nargs='+', default=[-1, -7, 0, 0, 0.25])
 parser.add_argument("-k", "--kernel", nargs='+', default=[-.1, .1, -5, -4])
 parser.add_argument("-b", "--bias", nargs='+', default=[-.1, .1, -5, -4])
+parser.add_argument("-r", "--reinitialize_weights", action="store_true")
 args = parser.parse_args()
 
 print(args)
@@ -45,19 +49,31 @@ learning_rate = args.learningrate
 summaries_dir = './summaries/' + args.name + '-' + str(int(time.time())) + '/'
 save_dir = './saves/' + args.name + '-' + str(int(time.time())) + '/'
 log_dir = './logs/' + args.name + '-' + str(int(time.time())) + '.txt'
+
+if not os.path.exists(os.path.dirname(log_dir)):
+    os.makedirs(os.path.dirname(log_dir))
+    print("Directory ", os.path.dirname(log_dir), " Created ")
+else:
+    print("Directory ", os.path.dirname(log_dir), " already exists")
+
+
+if not os.path.exists(os.path.dirname(summaries_dir)):
+    os.makedirs(os.path.dirname(summaries_dir))
+    print("Directory ", os.path.dirname(summaries_dir), " Created ")
+else:
+    print("Directory ", os.path.dirname(summaries_dir), " already exists")
+
 with open(log_dir, 'w') as log_file:
     log_file.write(str(args) + '\n')
 
 num_classes = 10
-epochs = 50000
-alpha = args.alpha
-beta = args.beta
-save_frequency = args.savefrequency
+epochs = args.epochs
 
 model = BayesNN(input_dim,
                 output_dim,
                 batch_size=batch_size,
-                activation = args.activation,
+                activation=args.activation,
+                layer_sizes=args.layer_sizes,
                 prior_mixture_std_1 = np.exp(float(args.prior[0])).astype(np.float32),
                 prior_mixture_std_2 = np.exp(float(args.prior[1])).astype(np.float32),
                 prior_mixture_mu_1=float(args.prior[2]),
@@ -97,7 +113,8 @@ y_train_logits = keras.utils.to_categorical(y_train, num_classes)
 y_test_logits = keras.utils.to_categorical(y_test, num_classes)
 
 cce = CategoricalCrossentropy()
-optimizer = AdamOptimizer(learning_rate=learning_rate)
+optimizer = GradientDescentOptimizer(learning_rate=learning_rate)
+#optimizer = AdamOptimizer(learning_rate=learning_rate)
 #optimizer = tf.contrib.opt.AdamWOptimizer(weight_decay=0.00001, learning_rate=learning_rate)
 acc = tf.keras.metrics.Accuracy()
 
@@ -129,8 +146,8 @@ for i in range(samples):
         likelihood_loss = cross_entropy_loss(labels_ph, tf.nn.softmax(predictions))
 
         sampled["likelihood_loss"].append(likelihood_loss)
-        sampled["loss"].append((1/M)*model.complexity_loss + likelihood_loss)
-        sampled["grad"].append(model.grads(likelihood_loss, weight=1/M))
+        sampled["loss"].append(complexity_weight_ph*model.complexity_loss + likelihood_loss)
+        sampled["grad"].append(model.grads(likelihood_loss, weight=complexity_weight_ph))
 
         for key, val in model.get_state().items():
             sampled[key].append(val)
@@ -151,42 +168,92 @@ step = 0
 with tf.Session() as sess:
     sess.run(init)
 
-    for epoch in range(epochs):
-        print("EPOCH {}\n".format(epoch))
+    for epoch in tqdm(range(epochs)):
         batches = np.random.permutation(range(N))[:N-(N % batch_size)].reshape(M, batch_size)
-        for i in tqdm(range(len(batches))):
-            #pi = (2**(M-(i+1))) / ((2**M) - 1)
-            pi = 1/M
+
+        for i in range(len(batches)):
             batch = batches[i]
-            feed_dict = {in_ph: x_train[batch], labels_ph : y_train[batch]}
+            feed_dict = {in_ph: x_train[batch], labels_ph : y_train[batch], complexity_weight_ph: (1/M)}
             batch_summaries, _ = sess.run([batch_summaries_op, update_op], feed_dict)
             batch_summary_writer.add_summary(batch_summaries, global_step=step)
             step += 1
 
-        if epoch > 1 and epoch % 250 == 0:
+        if epoch > 1 and epoch % 100 == 0:
             random_indices = np.random.permutation(len(x_train))[:10000]
 
-            test_summaries, test_acc = sess.run([epoch_summaries_op, ops["acc_op"]], feed_dict={in_ph: x_test,
-                                                                                                labels_ph: y_test})
+            test_summaries, test_acc, cm, unq, b = sess.run([epoch_summaries_op,
+                                                        ops["acc_op"],
+                                                        ops["confusion_matrix_op"],
+                                                        ops["unique_op"],
+                                                        ops["bias_op"]],
+                                                       feed_dict={in_ph: x_test,
+                                                                  labels_ph: y_test,
+                                                                  complexity_weight_ph: (1/M)})
+
             train_summaries, train_acc = sess.run([epoch_summaries_op, ops["acc_op"]],
                                                   feed_dict={in_ph: x_train[random_indices],
-                                                             labels_ph: y_train[random_indices]})
+                                                             labels_ph: y_train[random_indices],
+                                                             complexity_weight_ph: (1/M)})
 
             test_summary_writer.add_summary(test_summaries, global_step=epoch)
             train_summary_writer.add_summary(train_summaries, global_step=epoch)
 
             print("validation accuracy: {}".format(test_acc))
             print("training accuracy: {}".format(train_acc))
+            print("size: {}".format(N))
+            print("CONFUSION")
+            print(np.array2string(cm))
+            print("BIAS")
+            ix = np.argsort(unq)
+            print(np.array2string(b[ix]))
+
+            y_train_unique, y_train_counts = np.unique(y_train, return_counts=True)
+            print("TRAIN COMPOSITION")
+            print(np.array2string(y_train_counts))
+            print(np.array2string(y_train_counts / np.sum(y_train_counts)))
+
+            print("CORRELATION")
+            print(np.corrcoef(np.stack((b[ix], y_train_counts), axis=0)))
+
 
         if epoch >= args.initial_iterations and epoch % args.step_iterations == 0 and len(x_train) < args.final_size:
             r = np.random.permutation(len(X_TRAIN))[:10000]
+            feed_dict = {in_ph: X_TRAIN[r], labels_ph: Y_TRAIN[r], complexity_weight_ph: (1/M)}
 
             if args.sampling_type == "random":
-                train_top_confusing = np.arange(10)
+                train_top_confusing = np.arange(1)
+                entropy, epistemic, softmax_predictions = sess.run([ops["entropy_op"],
+                                                                    ops["epistemic_op"],
+                                                                    ops["softmax_predictions_op"]], feed_dict)
+
             elif args.sampling_type == "entropy":
-                train_top_confusing = sess.run(ops["top_entropy_indices"], {in_ph: X_TRAIN[r], labels_ph: Y_TRAIN[r]})
+                train_top_confusing, entropy, epistemic, softmax_predictions = sess.run([ops["top_entropy_indices"],
+                                                                                         ops["entropy_op"],
+                                                                                         ops["epistemic_op"],
+                                                                                         ops["softmax_predictions_op"]], feed_dict)
+
             elif args.sampling_type == "epistemic":
-                train_top_confusing = sess.run(ops["top_epistemic_indices"], {in_ph: X_TRAIN[r], labels_ph: Y_TRAIN[r]})
+                train_top_confusing, entropy, epistemic, softmax_predictions = sess.run([ops["top_epistemic_indices"],
+                                                                                         ops["entropy_op"],
+                                                                                         ops["epistemic_op"],
+                                                                                         ops["softmax_predictions_op"]], feed_dict)
+
+
+            with open('./logs/' + args.name + '-samples.txt', 'a+') as f:
+                f.write(args.sampling_type)
+                f.write("\n")
+                f.write("====EPOCH-{}====\n".format(epoch))
+                f.write("#-#-ENTROPY-#-#\n")
+                f.write(np.array2string(entropy[train_top_confusing]))
+                f.write("\n")
+                f.write("#-#-EPISTEMIC-#-#\n")
+                f.write(np.array2string(epistemic[train_top_confusing]))
+                f.write("\n")
+                f.write("#-#-PREDICTIONS-#-#\n")
+                p = np.swapaxes(softmax_predictions[:, train_top_confusing, :], 0, 1)
+                f.write(np.array2string(p, precision=3, max_line_width=5000))
+                f.write("\n")
+
 
             x_train = np.concatenate([x_train, X_TRAIN[r[train_top_confusing]]])
             y_train = np.concatenate([y_train, Y_TRAIN[r[train_top_confusing]]])
@@ -195,6 +262,9 @@ with tf.Session() as sess:
             N = len(x_train)
             M = N // batch_size
 
+            if args.reinitialize_weights:
+                print("Reinitializing weights after taking new training samples")
+                model.reinitialize_weights()
 
 
 

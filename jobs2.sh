@@ -1,0 +1,14 @@
+python bayesnn.py -n jobs2/test_a_$1 -s 10 --reinitialize_weights -i 50 -f 200 -t 200 -T 200 -l 0.0001 -L 400 400 -a elu -S $1 -c 50 -p 0 0 0 0 0.25 -k -0.1 0.1 -5 -4 -b -0.1 0.1 -5 -4
+python bayesnn.py -n jobs2/test_b_$1 -s 10 --reinitialize_weights -i 50 -f 200 -t 200 -T 200 -l 0.0001 -L 400 400 -a elu -S $1 -c 50 -p 1 1 0 0 0.25 -k -0.1 0.1 -5 -4 -b -0.1 0.1 -5 -4
+python bayesnn.py -n jobs2/test_c_$1 -s 10 --reinitialize_weights -i 50 -f 200 -t 200 -T 200 -l 0.0001 -L 400 400 -a elu -S $1 -c 50 -p 2 2 0 0 0.25 -k -0.1 0.1 -5 -4 -b -0.1 0.1 -5 -4
+python bayesnn.py -n jobs2/test_d_$1 -s 10 --reinitialize_weights -i 50 -f 200 -t 200 -T 200 -l 0.0001 -L 400 400 -a elu -S $1 -c 50 -p 0 0 0 0 0.25 -k -0.5 0.5 -3 -2 -b -0.1 0.1 -5 -4
+python bayesnn.py -n jobs2/test_e_$1 -s 10 --reinitialize_weights -i 50 -f 200 -t 200 -T 200 -l 0.0001 -L 400 400 -a elu -S $1 -c 50 -p 1 1 0 0 0.25 -k -0.5 0.5 -3 -2 -b -0.1 0.1 -5 -4
+python bayesnn.py -n jobs2/test_f_$1 -s 10 --reinitialize_weights -i 50 -f 200 -t 200 -T 200 -l 0.0001 -L 400 400 -a elu -S $1 -c 50 -p 2 2 0 0 0.25 -k -0.5 0.5 -3 -2 -b -0.1 0.1 -5 -4
+python bayesnn.py -n jobs2/test_g_$1 -s 10 --reinitialize_weights -i 50 -f 200 -t 200 -T 200 -l 0.0001 -L 200 200 -a elu -S $1 -c 50 -p 0 0 0 0 0.25 -k -0.1 0.1 -5 -4 -b -0.1 0.1 -5 -4
+python bayesnn.py -n jobs2/test_h_$1 -s 10 --reinitialize_weights -i 50 -f 200 -t 200 -T 200 -l 0.0001 -L 200 200 -a elu -S $1 -c 50 -p 1 1 0 0 0.25 -k -0.1 0.1 -5 -4 -b -0.1 0.1 -5 -4
+python bayesnn.py -n jobs2/test_i_$1 -s 10 --reinitialize_weights -i 50 -f 200 -t 200 -T 200 -l 0.0001 -L 200 200 -a elu -S $1 -c 50 -p 2 2 0 0 0.25 -k -0.1 0.1 -5 -4 -b -0.1 0.1 -5 -4
+python bayesnn.py -n jobs2/test_j_$1 -s 10 --reinitialize_weights -i 50 -f 200 -t 200 -T 200 -l 0.0001 -L 200 200 -a elu -S $1 -c 50 -p 0 0 0 0 0.25 -k -0.5 0.5 -3 -2 -b -0.1 0.1 -5 -4
+python bayesnn.py -n jobs2/test_k_$1 -s 10 --reinitialize_weights -i 50 -f 200 -t 200 -T 200 -l 0.0001 -L 200 200 -a elu -S $1 -c 50 -p 1 1 0 0 0.25 -k -0.5 0.5 -3 -2 -b -0.1 0.1 -5 -4
+python bayesnn.py -n jobs2/test_l_$1 -s 10 --reinitialize_weights -i 50 -f 200 -t 200 -T 200 -l 0.0001 -L 200 200 -a elu -S $1 -c 50 -p 2 2 0 0 0.25 -k -0.5 0.5 -3 -2 -b -0.1 0.1 -5 -4
+python bayesnn.py -n jobs2/test_m_$1 -s 10 --reinitialize_weights -i 50 -f 200 -t 200 -T 200 -l 0.0001 -L 200 200 -a elu -S $1 -c 50 -p -1 -1 0 0 0.25 -k -0.1 0.1 -5 -4 -b -0.1 0.1 -5 -4
+python bayesnn.py -n jobs2/test_n_$1 -s 10 --reinitialize_weights -i 50 -f 200 -t 200 -T 200 -l 0.0001 -L 200 200 -a elu -S $1 -c 50 -p -1 -1 0 0 0.25 -k -0.5 0.5 -3 -2 -b -0.1 0.1 -5 -4

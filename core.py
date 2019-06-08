@@ -19,13 +19,14 @@ EPS = 1e-9
 
 def get_summaries(sampled, labels_ph):
     stacked_predictions_op = tf.stack(sampled["prediction"])
-    avg_prediction_op = tf.reduce_mean(tf.nn.softmax(stacked_predictions_op), axis=0)
+    softmax_predictions_op = tf.nn.softmax(stacked_predictions_op)
+    avg_prediction_op = tf.reduce_mean(softmax_predictions_op, axis=0)
     entropy_op = -tf.reduce_sum((avg_prediction_op * tf.log(avg_prediction_op+EPS)), axis=1)
     avg_entropy_op = tf.reduce_mean(entropy_op)
     max_entropy_op = tf.reduce_max(entropy_op)
 
-    aleatoric_op = tf.reduce_mean(-tf.reduce_sum(tf.nn.softmax(stacked_predictions_op) *
-                                                      tf.log(tf.nn.softmax(stacked_predictions_op)+EPS),
+    aleatoric_op = tf.reduce_mean(-tf.reduce_sum(softmax_predictions_op *
+                                                      tf.log(softmax_predictions_op+EPS),
                                                       axis=2), axis=0)
 
     avg_variational_posterior = tf.reduce_mean(tf.stack(sampled["variational_posterior"]))
@@ -36,8 +37,8 @@ def get_summaries(sampled, labels_ph):
     max_epistemic_op = tf.reduce_max(epistemic_op)
     avg_aleatoric_op = tf.reduce_mean(aleatoric_op)
 
-    _, top_entropy_indices = tf.math.top_k(entropy_op, k=10)
-    _, top_epistemic_indices = tf.math.top_k(epistemic_op, k=10)
+    _, top_entropy_indices = tf.math.top_k(entropy_op, k=1)
+    _, top_epistemic_indices = tf.math.top_k(epistemic_op, k=1)
 
     avg_complexity_loss_op = tf.reduce_mean(tf.stack(sampled["complexity_loss"]))
     avg_likelihood_loss_op = tf.reduce_mean(tf.stack(sampled["likelihood_loss"]))
@@ -56,6 +57,9 @@ def get_summaries(sampled, labels_ph):
     avg_aleatoric_incorrect_op = tf.reduce_mean(tf.boolean_mask(aleatoric_op, tf.logical_not(correct_prediction_op)))
     acc_op = tf.reduce_mean(tf.cast(correct_prediction_op, tf.float32))
 
+    confusion_matrix_op = tf.math.confusion_matrix(labels_ph, prediction_op)
+    unique_op, _, count_op = tf.unique_with_counts(prediction_op)
+    bias_op = count_op / tf.reduce_sum(count_op)
 
 
     batch_summaries_op = tf.summary.merge([tf.summary.scalar('batch_avg_complexity_loss', avg_complexity_loss_op),
@@ -95,6 +99,10 @@ def get_summaries(sampled, labels_ph):
         "top_epistemic_indices": top_epistemic_indices,
         "entropy_op": entropy_op,
         "epistemic_op": epistemic_op,
+        "softmax_predictions_op": softmax_predictions_op,
+        "confusion_matrix_op": confusion_matrix_op,
+        "unique_op": unique_op,
+        "bias_op": bias_op,
     }
 
     return batch_summaries_op, epoch_summaries_op, ops
@@ -329,6 +337,7 @@ class Bayesion(Layer):
         self.input_spec = InputSpec(min_ndim=2, axes={-1: input_dim})
         self.built = True
 
+
     def call(self, inputs):
 
         self.kernel, self.kernel_epsilon = self.kernel_distribution.sample()
@@ -347,6 +356,13 @@ class Bayesion(Layer):
             output = self.activation(output)
 
         return output
+
+    def reinitialize_weights(self):
+        session = K.get_session()
+        self.kernel_mean.initializer.run(session=session)
+        self.kernel_rho.initializer.run(session=session)
+        self.bias_mean.initializer.run(session=session)
+        self.bias_rho.initializer.run(session=session)
 
     def compute_output_shape(self, input_shape):
         assert input_shape and len(input_shape) >= 2
@@ -389,7 +405,7 @@ class BayesNN(tf.keras.Model):
         self.model_activations = []
 
         for units in layer_sizes:
-            self.model_layers.append(Bayesion(units,
+            self.model_layers.append(Bayesion(int(units),
                                      prior_mixture_std_1=prior_mixture_std_1,
                                      prior_mixture_std_2=prior_mixture_std_2,
                                      prior_mixture_mu_1=prior_mixture_mu_1,
@@ -475,6 +491,11 @@ class BayesNN(tf.keras.Model):
             "log_prior": self.log_prior,
         }
         return state
+
+    def reinitialize_weights(self):
+        for layer in self.model_layers:
+            layer.reinitialize_weights()
+        self.final_layer.reinitialize_weights()
 
 
 
